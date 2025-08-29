@@ -47,6 +47,4 @@ drap = [
   "*.txt", "*.md"
 ]
 
-[project.urls]
-Homepage = "https://test.pypi.org/project/DrAP/"
-Source = "https://test.pypi.org/project/DrAP/"
+
