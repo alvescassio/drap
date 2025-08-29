@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "drap"
-version = "0.0.3.post12"
+version = "v0.0.4"
 description = "Tool for analyzing droplet size and concentration using video and EDF images"
 readme = "README.md"
 license = {text = "MIT"}
