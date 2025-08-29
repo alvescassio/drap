@@ -29,4 +29,8 @@ jobs:
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+<<<<<<< HEAD
       run: python -m twine upload dist/*
+=======
+      run: python -m twine upload dist/*
+>>>>>>> aa76e57 (release: bump version to 0.0.4.post4)
