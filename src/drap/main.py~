@@ -1,7 +1,5 @@
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor
-from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo
+
 import cv2
 from fabio.edfimage import EdfImage
 import tkinter as tk

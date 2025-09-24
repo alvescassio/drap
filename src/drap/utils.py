@@ -54,8 +54,8 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        # self.test = True
-        self.test = False
+        self.test = True
+        # self.test = False
         # print("teste")
         
         
@@ -197,9 +197,9 @@ class ImageCropper(QMainWindow):
         if self.test: 
             self.load_image()
             self.int_input1.setText("45.") 
-            self.int_input2.setText("5") 
-            self.int_input3.setText("50") 
-            self.int_input4.setText("2.0") 
+            self.int_input2.setText("10") 
+            self.int_input3.setText("5000") 
+            self.int_input4.setText("1.0") 
 
         self.show()
 
@@ -207,7 +207,8 @@ class ImageCropper(QMainWindow):
         
         
         if self.test: 
-            self.file_path = "/home/standard02/Documents/programming/python/bolhas/2024-07-12-NW-usAg-GSH-2mgml.flv"
+            self.file_path = "/media/standard02/Linux_sync_2020_02/standart/Documents/programming/python/files/15-SY-50cm/water-without-absolute-intensity2.flv"
+            # self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
         else:
             self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
         
@@ -421,7 +422,7 @@ class ImageCropper(QMainWindow):
             numbers = [(input_field.text()) for input_field in [self.int_input1, self.int_input2, self.int_input3, self.int_input4]];
 
             for output_field, number in zip([self.int_output1, self.int_output2, self.int_output3], numbers):
-                output_field.setText(f'Número: {number}')
+                output_field.setText(f'Number: {number}')
             
             set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_limit = int(numbers[2]), Co = float(numbers[3])  , retangulo = self.ret, print_pdf = print_pdf);
             result_image = set_file_1.read_video();
@@ -1306,6 +1307,12 @@ class conc_scat_video:
                         factor = 12;
                 new_w = int(img_w * factor)
                 new_h = int(img_h * factor)
+                
+                if new_w <= 1 or new_h <= 1:
+                    print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
+                    break
+                
+                
                 
                 imagem = cv2.resize(imagem, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
                 # cv2.imwrite("saida_crop.png",imagem);
