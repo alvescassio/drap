@@ -1309,7 +1309,7 @@ class conc_scat_video:
                 new_h = int(img_h * factor)
                 
                 if new_w <= 1 or new_h <= 1:
-                    print(f"Error, Check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
+                    print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
                     break
                 
                 
