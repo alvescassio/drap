@@ -308,14 +308,22 @@ class ImageCropper(QMainWindow):
             set_file_1.read_setfiles_edf(option = 0);
 
     def contate_sort_images_edf_size_drop(self):
-
-        directory = QFileDialog.getExistingDirectory(self, 'Choose (Samples) Directory with EDF Images');
+        
+        
+        if self.test: 
+            directory = "/home/standard02/Documents/programming/python/bolhas/data/15-SY-30cm/edf-15-SY"
+        else:
+            directory = QFileDialog.getExistingDirectory(self, 'Choose (Samples) Directory with EDF Images');
+            
         directory = directory + "/";
         directory = Path(directory);
         directory = directory.resolve();
         directory = os.path.normpath(directory);
 
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Choose (Samples) file with polynomio data', directory, 'Data files (*.dat *.txt *.csv)');
+        if self.test: 
+            file_path = '/home/standard02/Documents/programming/python/bolhas/PyPI/drap/data/15SY-30cm_Video_time_size.csv'
+        else:
+            file_path, _ = QFileDialog.getOpenFileName(self, 'Choose (Samples) file with polynomio data', directory, 'Data files (*.dat *.txt *.csv)');
 
         file_path = Path(file_path);
         file_path = file_path.resolve();
@@ -327,15 +335,23 @@ class ImageCropper(QMainWindow):
             set_file_1 = conc_scat_video(5,path = directory, input_file = file_path);
             set_file_1.read_setfiles_edf(option = 2);
 
-        directory = QFileDialog.getExistingDirectory(self, 'Choose (Background) Directory with EDF Images');
+
+        if self.test: 
+            directory = "/home/standard02/Documents/programming/python/bolhas/data/15-SY-30cm/edf-files-buffer"
+        else:
+            directory = QFileDialog.getExistingDirectory(self, 'Choose (Background) Directory with EDF Images');
         directory = directory + "/";
 
 
         directory = Path(directory);
         directory = directory.resolve();
         directory = os.path.normpath(directory);
-
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Choose (Background) file with polynomio data', directory, 'Data files (*.dat *.txt *.csv)');
+        
+        
+        if self.test: 
+            file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/data/water-without-absolute-intensity-30cm_Video_time_size.csv"
+        else :
+            file_path, _ = QFileDialog.getOpenFileName(self, 'Choose (Background) file with polynomio data', directory, 'Data files (*.dat *.txt *.csv)');
 
         file_path = Path(file_path);
         file_path = file_path.resolve();
@@ -659,12 +675,12 @@ def concatene_files_scat_back(set_file_1, set_file_2):
 
 
     factor = 0.15;
-    max_area = max(_date_1["area_big"] for _date_1 in temp_info_files_edf)
+    # max_area = max(_date_1["area_big"] for _date_1 in temp_info_files_edf)
     temp_name_file = numpy.array(list_scat_back[:,0]);
     for _date_1 in temp_info_files_edf:
         area_avg_1 = (_date_1['area_big'] + _date_1['area_small']) / 2. ;
 
-        min_diff = max_area;
+        min_diff = float('inf');
 
         for i_file_back in range(0, len(list_back_size_avg_drop)):
             if abs(area_avg_1 -  float(list_back_size_avg_drop[i_file_back,1])) <= (min_diff):
@@ -1178,7 +1194,6 @@ class conc_scat_video:
 
         if  option == 0 or option == 1:
             save_data_edf(self.info_files_edf, os.path.join(path_dir_imgs, name_file), option);
-
 
 
     def read_video(self):        

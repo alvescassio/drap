@@ -30,6 +30,7 @@ ENV/
 Thumbs.db
 
 # Dados grandes/temporários
+data/*
 data/**/*.tmp
 data/**/*.cache
 
