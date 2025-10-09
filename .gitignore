@@ -6,6 +6,9 @@ __pycache__/
 *.egg-info/
 *.egg
 *.log
+*.png
+*.mp4
+src/drap/video_save.py
 *~
 
 # Build / Dist
@@ -31,6 +34,7 @@ Thumbs.db
 
 # Dados grandes/temporários
 data/*
+test_codecs/*
 data/**/*.tmp
 data/**/*.cache
 

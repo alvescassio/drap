@@ -1,0 +1,23 @@
+file_video_1: /home/standard02/Documents/programming/python/bolhas/test/2024-07-12-NW-usAg-GSH-2mgml.flv
+Co_1: 2.0
+step_1: 5
+left bottom pixel x_1: 40
+left bottom pixel y_1: 220
+width_1: 160
+height_1:  150
+pixel/mm_1: 45
+directory_path_1: NW-usAg-GSH-2mgml
+time_limit_1: 2000
+print_pdf_1: y
+
+file_video_2: /home/standard02/Documents/programming/python/bolhas/test/2024-07-10-water-without-absolute-intensity.flv
+Co_2: 2.0
+step_2: 10
+left bottom pixel x_2: 40
+left bottom pixel y_2: 220
+width_2: 160
+height_2:  150
+pixel/mm_2: 45
+directory_path_2: edf-files-buffer
+time_limit_2: 4000
+print_pdf_2: y

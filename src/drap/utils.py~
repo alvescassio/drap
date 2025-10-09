@@ -1,6 +1,8 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox
+from PyQt5.QtWidgets import (QApplication, QProgressDialog, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, 
+                             QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QSlider, QDialog, QDialogButtonBox,
+                             QComboBox)
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor
-from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo
+from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo, QTimer, QEvent
 from fabio.edfimage import EdfImage
 import tkinter as tk
 from tkinter import filedialog
@@ -24,32 +26,81 @@ import re
 import argparse
 import cv2
 import matplotlib
+import subprocess
+import shutil
+import tempfile
+from typing import Iterable, Set, Tuple, Optional, Callable, List
+from textwrap import dedent
 
 import matplotlib.pyplot as plt
 
 matplotlib.use('Agg')
 
 
-from PyQt5.QtWidgets import QApplication
-import sys
 
 
+# Mapeamento codec → extensão recomendada
+CODEC_EXTENSIONS = {
+    "mp4v": ".mp4",
+    "avc1": ".mp4",
+    "H264": ".mp4",
+    "XVID": ".avi",
+    "MJPG": ".avi",
+    "DIVX": ".avi",
+    "WMV1": ".avi",
+    "WMV2": ".avi",
+}
 
+class CodecDialog(QDialog):
+    def __init__(self, available_codecs, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Escolher Codec de Vídeo")
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout()
+
+        # Texto de instrução
+        layout.addWidget(QLabel("Selecione o codec e a extensão para salvar o vídeo:"))
+
+        # Combobox para codecs
+        self.codec_combo = QComboBox()
+        for codec in available_codecs:
+            ext = CODEC_EXTENSIONS.get(codec, ".avi")
+            self.codec_combo.addItem(f"{codec}  →  {ext}", (codec, ext))
+        layout.addWidget(self.codec_combo)
+
+        # Botões OK/Cancel
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.setLayout(layout)
+
+    def get_selection(self):
+        """Retorna (codec, extensão) escolhido pelo usuário"""
+        return self.codec_combo.currentData()
 
 
 class ImageCropper(QMainWindow):
+    
+    
     def __init__(self):
+        
         super().__init__()
-        self.initUI()
-
-        # Atributos para desenho
         self.drawing = False
         self.rect_start = QPoint()
         self.current_rect = QRect()
-        self.image = None
-        self.pixmap = None
         self.original_image = None
+        self.image = None
+        self.pixmap = None        
         self.result_image = None
+        self.ret = None
+        
+        
+        self.initUI()
+
+        
 
 
     def initUI(self):
@@ -72,22 +123,99 @@ class ImageCropper(QMainWindow):
         self.image_layout = QVBoxLayout()
         self.main_layout.addLayout(self.image_layout)
 
-        # Layout to controls
-        self.controls_layout = QVBoxLayout()
-        self.main_layout.addLayout(self.controls_layout)
 
         # Create a QLabel to display the image
         self.image_label = QLabel(self)
+        self.image_label.setAlignment(Qt.AlignCenter)    # centraliza o pixmap
+        self.image_label.setMinimumSize(320, 240)
         self.image_layout.addWidget(self.image_label)
+        self.image_label.setMouseTracking(True)
+
+        
+        # --- Video Player Controls ---      
+        # Layout de controles do player de vídeo (abaixo do vídeo)
+        self.video_bar_time_layout = QVBoxLayout()
+        self.image_layout.addLayout(self.video_bar_time_layout)
+        
+        # Layout de controles do player de vídeo (abaixo do vídeo)
+        self.video_controls_layout = QVBoxLayout()
+        self.image_layout.addLayout(self.video_controls_layout)
+        
+        # progress bar
+        self.video_slider = QSlider(Qt.Horizontal)
+        self.video_bar_time_layout.addWidget(self.video_slider)
+        self.video_slider.sliderMoved.connect(self.seek_video)     
+        
+        # show time 
+        self.time_label = QLabel('00:00 / 00:00')
+        self.video_bar_time_layout.addWidget(self.time_label)   
+        
+        self.mouse_label = QLabel('Mouse: (0,0)')
+        self.video_bar_time_layout.addWidget(self.mouse_label)
+        
+        # Timer para reprodução de vídeo
+        self.video_timer = QTimer()
+        self.video_timer.timeout.connect(self.next_frame)
+        
+        # Variáveis de controle de vídeo
+        self.video = None  # cv2.VideoCapture
+        self.fps = 0
+        self.total_frames = 0
+        self.current_frame = 0
+        self.playing = False
+        
+        # botons line: Play, Pause, Stop
+        self.video_buttons_layout = QHBoxLayout()
+        self.video_controls_layout.addLayout(self.video_buttons_layout)
+        
+        # Create a button to load the image
+        self.load_button = QPushButton('Load Video', self)
+        self.video_buttons_layout.addWidget(self.load_button)
+        self.load_button.clicked.connect(self.load_image)
+        
+        # Botões de controle
+        self.play_button = QPushButton('Play')
+        self.pause_button = QPushButton('Pause')
+        self.stop_button = QPushButton('Stop')
+        self.export_button = QPushButton('Export Video', self)        
+        
+
+        self.video_buttons_layout.addWidget(self.play_button)
+        self.video_buttons_layout.addWidget(self.pause_button)
+        self.video_buttons_layout.addWidget(self.stop_button)
+        self.video_buttons_layout.addWidget(self.export_button)
+        
+        self.play_button.clicked.connect(self.play_video)
+        self.pause_button.clicked.connect(self.pause_video)
+        self.stop_button.clicked.connect(self.stop_video)  
+        self.export_button.clicked.connect(self.export_video_dialog)
+          
+        
+        # Slider de velocidade (0.25x a 2.0x)
+        self.speed_label = QLabel("Speed: 1.0x")
+        self.video_controls_layout.addWidget(self.speed_label)
+        self.speed_slider = QSlider(Qt.Horizontal)
+        self.speed_slider.setMinimum(25)   #  0.25x
+        self.speed_slider.setMaximum(200)  #  2.0x
+        self.speed_slider.setValue(100)    #  1.0x
+        self.speed_slider.setTickInterval(25)
+        self.speed_slider.setTickPosition(QSlider.TicksBelow)
+        self.video_controls_layout.addWidget(self.speed_slider)
+
+        self.speed_slider.valueChanged.connect(self.update_speed)
+        
+        
+        
+        
+        # Layout to controls
+        self.controls_layout = QVBoxLayout()
+        self.main_layout.addLayout(self.controls_layout)
 
         # Create a QLabel to display the resulting image
         self.result_label = QLabel(self)
         self.image_layout.addWidget(self.result_label)
 
-        # Create a button to load the image
-        self.load_button = QPushButton('Load Video', self)
-        self.controls_layout.addWidget(self.load_button)
-        self.load_button.clicked.connect(self.load_image)
+
         
 
         # Create a button to crop the image
@@ -187,9 +315,7 @@ class ImageCropper(QMainWindow):
         self.check_option = QCheckBox("Print a PDF with images", self)
         self.check_option.setChecked(False)  # desmarcado por padrão
         self.controls_layout.addWidget(self.check_option)
-        
-        
-
+     
         # Hook mouse events
         self.image_label.installEventFilter(self)
         
@@ -198,7 +324,7 @@ class ImageCropper(QMainWindow):
             self.load_image()
             self.int_input1.setText("45.") 
             self.int_input2.setText("10") 
-            self.int_input3.setText("5000") 
+            self.int_input3.setText("1000") 
             self.int_input4.setText("1.0") 
 
         self.show()
@@ -206,8 +332,12 @@ class ImageCropper(QMainWindow):
     def load_image(self):
         
         
+        if hasattr(self, "video") and self.video and self.video.isOpened():
+            self.video.release()
+
+        
         if self.test: 
-            self.file_path = "/media/standard02/Linux_sync_2020_02/standart/Documents/programming/python/files/15-SY-50cm/water-without-absolute-intensity2.flv"
+            self.file_path = "/home/standard02/Documents/programming/python/bolhas/test/2024-07-10-water-without-absolute-intensity.flv"
             # self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
         else:
             self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
@@ -217,54 +347,553 @@ class ImageCropper(QMainWindow):
             return
         
         self.file_path = os.path.normpath(str(Path(self.file_path).expanduser().resolve()))
+        self.video = cv2.VideoCapture(self.file_path)
+        self.ret = None
         
+        
+        if not self.video.isOpened():
+            QMessageBox.critical(self, 'Error', f'Could not open video:\n{self.file_path}')
+            return    
+              
         # self.file_path = os.path.normpath(self.file_path)
         # self.file_path = QFileInfo(self.file_path).fileName();
         # self.file_path = Path(self.file_path);
         # self.file_path = self.file_path.resolve();
         # self.file_path = os.path.normpath(self.file_path);
-            
-        video = cv2.VideoCapture(self.file_path);
-        
-        if not video.isOpened():
-            QMessageBox.critical(self, 'Error', f'Could not open video:\n{self.file_path}')
-            return
-        
-        rval, frame = video.read();
+                
+        rval, frame = self.video.read();
         
         if not rval or frame is None:
             QMessageBox.critical(self, 'Error', 'Could not read first frame from the video.')
-            video.release()
+            self.video.release()
+            return
+ 
+        # Converte o frame OpenCV (BGR → RGB) para QImage/QPixmap
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        bytes_per_line = ch * w
+        qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+
+        # Atualiza atributos de imagem
+        self.original_image = qimg
+        self.image = qimg.copy()
+        self.pixmap = QPixmap.fromImage(self.image)
+        self.image_label.setPixmap(self.pixmap) #show image
+        # self.image_label.setScaledContents(True)
+        self.current_rect = QRect() 
+        self.update_image() 
+
+        # Reseta variáveis de estado
+        self.fps = int(self.video.get(cv2.CAP_PROP_FPS))
+        self.total_frames = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.duration_sec = self.total_frames / self.fps if self.fps else 0
+        self.current_frame = 0
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self.video_slider.setMaximum(max(0, self.total_frames - 1))        
+        self.playing = False
+        
+        # Atualiza UI
+        # self.update_time_label()
+        # self.display_frame()
+        # self.image = self.original_image.copy()
+        # self.display_cv2_frame(frame)
+
+ 
+
+    def play_video(self):
+        
+        if self.video is None:
+            return
+        self.playing = True
+        # self.video_timer.start(int(1000 / self.fps))  # chama a cada frame
+        speed_factor = self.speed_slider.value() / 100.0
+        interval = max(1, int(1000 / self.fps / speed_factor))
+        self.video_timer.start(interval)
+
+
+    def pause_video(self):
+        
+        self.playing = False
+        self.video_timer.stop()
+        
+        
+    def stop_video(self):
+        
+        if self.video is None:
+            return
+        self.pause_video()
+        self.current_frame = 0
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self.display_frame()
+        self.video_slider.setValue(0)
+        self.update_time_label()
+
+        
+    def keyPressEvent(self, event):
+        
+        if event.key() == Qt.Key_Space:
+            if self.playing:
+                self.pause_video()
+            else:
+                self.play_video()
+
+
+    def next_frame(self):
+        
+        if self.video is None or not self.playing:
             return
         
-        file_path =  'data/';
-        file_path = Path(file_path);
-        file_path = file_path.resolve();
-        os.makedirs(file_path, exist_ok=True)
-        file_path = os.path.normpath(file_path);
-        file_path = os.path.join(file_path, 'sample_frame.jpg');
-        file_path = os.path.normpath(file_path);
-
-        ok = cv2.imwrite(file_path,frame);
-        if not ok:
-            QMessageBox.critical(self, 'Error', f'Failed to save first frame to:\n{file_path}')
-            video.release()
-            return        
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        ret, frame = self.video.read()
         
-        if file_path:
-            self.pixmap = QPixmap(file_path)
-            if self.pixmap.isNull():
-                QMessageBox.critical(self, 'Error', f'Failed to load image into QPixmap:\n{file_path}')
-                video.release()
-                return
-            self.original_image = self.pixmap.toImage()
-            self.image = self.pixmap.toImage()
-            self.image_label.setPixmap(self.pixmap)
-            self.image_label.setScaledContents(True)
-        self.fps = video.get(cv2.CAP_PROP_FPS);
-        self.total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.max_frames =  self.total_frames;
-        video.release();
+        if not ret:
+            self.pause_video()
+            return
+
+        self.display_cv2_frame(frame)
+        self.video_slider.setValue(self.current_frame)
+        self.update_time_label()
+        
+        self.current_frame += 1
+        
+        if self.current_frame >= self.total_frames:
+            self.stop_video()
+        
+       
+        
+
+    def display_frame(self):
+        
+        
+        if self.video is None:
+            return
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        ret, frame = self.video.read()
+        if ret:
+            self.display_cv2_frame(frame)
+
+    def display_cv2_frame(self, frame):
+        
+        rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+        q_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+
+        
+        # GUARDA a imagem atual
+        self.original_image = q_image
+        self.image = q_image.copy()
+        self.pixmap = QPixmap.fromImage(self.image)
+        self.image_label.setPixmap(self.pixmap)
+        
+        self.update_image()
+
+
+
+
+    def seek_video(self, frame_number):
+        
+        if self.video is None:
+            return
+        self.pause_video()
+        self.current_frame = frame_number
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        self.display_frame()
+        self.update_time_label()
+
+    def update_time_label(self):
+        
+        current_time = self.current_frame / self.fps if self.fps else 0
+        total_time = self.total_frames / self.fps if self.fps else 0
+        time_str = f"{self.format_time(current_time)} ({self.current_frame} frame) / {self.format_time(total_time)} min"
+        self.time_label.setText(time_str)
+
+    def format_time(self, seconds):
+        
+        m, s = divmod(int(seconds), 60)
+        return f"{m:02d}:{s:02d}"
+
+    def update_speed(self):
+        
+        speed_factor = self.speed_slider.value() / 100.0
+        self.speed_label.setText(f"Speed: {speed_factor:.2f}x")
+        if self.playing:
+            interval = max(1, int(1000 / self.fps / speed_factor))
+            self.video_timer.setInterval(interval)
+
+
+    def export_video_dialog(self):
+        
+        if self.video is None:
+            print(f"Error: input file not found: {self.video}", file=sys.stderr)
+            return
+        
+        available_codecs = self.detect_codecs()
+        dlg = CodecDialog(available_codecs)
+        if dlg.exec_() == QDialog.Accepted:
+            codec, ext = dlg.get_selection()
+            # print(f"✅ Codec escolhido: {codec}, Extensão: {ext}")
+
+
+            # fourcc = cv2.VideoWriter_fourcc(*codec)
+            # out = cv2.VideoWriter("saida" + ext, fourcc, fps, (width, height))
+        
+        # Diálogo para escolher onde salvar o vídeo
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Video As", "", f"Video Files {codec}")
+        base, ext = os.path.splitext(self.file_path)
+        out_ext = out_ext = os.path.splitext(save_path)[1].lower()
+
+        if not save_path:
+            return
+        
+        if not out_ext:
+            out_ext = '.mp4'
+            save_path = (save_path + out_ext)
+            
+
+        # Widgets para escolher parâmetros
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Export Video Settings")
+        layout = QVBoxLayout(dialog)
+
+        # Frame inicial
+        start_label = QLabel("Start Frame:")
+        start_input = QLineEdit(str(self.current_frame))
+        layout.addWidget(start_label)
+        layout.addWidget(start_input)
+
+        # Frame final
+        end_label = QLabel("End Frame:")
+        end_input = QLineEdit(str(self.total_frames - 1))
+        layout.addWidget(end_label)
+        layout.addWidget(end_input)
+
+        # keep decider when the frame will save
+        keep_decider_label = QLabel("Output FPS:")
+        keep_decider_input = QLineEdit(str(self.fps))
+        layout.addWidget(keep_decider_label)
+        layout.addWidget(keep_decider_input)
+
+
+        # Botões
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(button_box)
+
+
+        button_box.accepted.connect(lambda: self.export_video(
+            self.file_path,
+            save_path,
+            codec,
+            int(start_input.text()),
+            int(end_input.text()),
+            int(keep_decider_input.text()),
+            self.ret,
+            None
+            ))
+        # crop_rect=(100, 50, 400, 300)  
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+
+        dialog.exec_()  
+   
+   
+   
+    def export_video (self, in_path, out_path, codec, cut_first=0, cut_last=0, keep_decider=None, crop_rect=None, to_drop=None,):
+        
+        video_in = cv2.VideoCapture(in_path)        
+        
+        
+        if not video_in.isOpened():
+            raise RuntimeError(f"Not was possible open {in_path}")
+        
+        total_frames = int(video_in.get(cv2.CAP_PROP_FRAME_COUNT))      
+        fps_in = int(video_in.get(cv2.CAP_PROP_FPS))
+        if fps_in <= 0:
+            raise ValueError(f"Invalid FPS: {fps_in}")
+        
+        
+        # crop limits 
+        start = max(0, cut_first)
+        end = cut_last if cut_last > 0 else total_frames
+        end = max(start, end) - 1
+        # print(start, end, total_frames)
+        
+        
+        w_in = int(video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h_in = int(video_in.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        display_w = self.image_label.width()
+        display_h = self.image_label.height()
+        scale_x = w_in / display_w
+        scale_y = h_in / display_h  
+ 
+        
+        if crop_rect is not None:
+            x, y, w_out, h_out = crop_rect
+            x = int(x * scale_x)
+            y = int(y * scale_y)
+            w_out = int(w_out * scale_x)
+            h_out = int(h_out * scale_y)
+
+            # x = max(0, min(x, w_in - 1))
+            # y = max(0, min(y, h_in - 1))
+            # w_out = min(w_out, w_in - x)
+            # h_out = min(h_out, h_in - y)
+        else:
+            w_out = w_in
+            h_out = h_in
+            
+        size = (abs(w_out), abs(h_out))
+
+        
+        
+        kept = 0
+        for idx in range(start, end):
+            if to_drop and idx in to_drop:
+                continue
+            if keep_decider and idx % keep_decider != 0:
+                continue
+            kept += 1
+
+        if kept == 0:
+            raise RuntimeError("No frames selected for export!")     
+        
+        total_considered = end - start
+        fps_out = fps_in * (kept / total_considered)
+        # print(f"FPS adjusted: {fps_in:.2f} → {fps_out:.2f} (keeped {kept}/{total_considered})")
+        
+        
+        if size[0] <= 0 or size[1] <= 0:
+            raise ValueError(f"Invalid size: {size}")
+
+        # temporary file (backup)
+        out_ext = os.path.splitext(out_path)[1] or ".mp4"
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        with tempfile.NamedTemporaryFile(prefix="cut_", suffix=out_ext, delete=False,
+                                        dir=os.path.dirname(os.path.abspath(out_path))) as tmp:
+            tmp_out_path = tmp.name
+
+        # Inicializar VideoWriter (tentando codecs candidatos, como você já fazia)
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        writer = cv2.VideoWriter(tmp_out_path, fourcc, fps_out, size)
+
+        if not writer.isOpened():
+            raise RuntimeError("Failed to open VideoWriter with codec {codec}")
+
+        progress = QProgressDialog("Exporting video...", "Cancel", 0, kept, self)
+        progress.setWindowTitle("Please wait")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+
+
+        # Loop in frames
+        idx = 0
+        written = 0
+        current_kept = 0
+        
+        while True:
+            
+            ret, frame = video_in.read()
+            if not ret:
+                break
+
+            if idx < start:       # crop first N frames
+                idx += 1
+                continue
+            if idx >= end:         # crop last N frames
+                break
+            if to_drop and idx in to_drop:  # descartar manualmente
+                idx += 1
+                continue
+            if keep_decider and idx % keep_decider != 0:  # functions decide if keep
+                idx += 1
+                continue
+            
+            # Crop if exist rect
+            if crop_rect is not None:
+                frame = frame[y:y+h_out, x:x+w_out]
+
+            
+
+
+            # save frame 
+            writer.write(frame)
+            written += 1
+            idx += 1
+            current_kept += 1
+            
+            progress.setValue(current_kept)
+            QApplication.processEvents()            
+            if progress.wasCanceled():
+                print("Export canceled by user.")
+                break
+
+
+        video_in.release()
+        writer.release()
+
+        if not progress.wasCanceled():
+            # change the last file 
+            shutil.move(tmp_out_path, out_path)
+            # print(f"Video exported in {out_path}, ({written} saves frames)")
+            progress.setValue(kept)
+        else:
+            os.remove(tmp_out_path)
+            
+    def draw_square(self, event, x, y, flags, param, imagem):
+
+
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # Primeiro clique → guarda o ponto inicial
+            self.vertices = [(x, y)]
+            self.drawing = True
+
+        elif event == cv2.EVENT_MOUSEMOVE and self.drawing:
+            # Se estiver arrastando, mostra o quadrado "dinâmico"
+            img_copy = param.copy()
+            cv2.rectangle(img_copy, self.vertices[0], (x, y), (255, 0, 0), 2)
+            cv2.imshow("Video", img_copy)
+
+        elif event == cv2.EVENT_LBUTTONUP:
+            # Segundo clique → fecha o quadrado
+            self.vertices.append((x, y))
+            self.drawing = False
+            cv2.rectangle(param, vertices[0], self.vertices[1], (255, 0, 0), 2)
+            cv_imshow_safe("Video", param)
+
+            # print(f"Rectangle of {self.vertices[0]} up to {self.vertices[1]}")
+ 
+ 
+ 
+    def label_pos_to_image_pos(self, pos: QPoint):
+        
+
+        if self.pixmap is None or self.image is None:
+            return None
+
+        label_size = self.image_label.size()
+        pm = self.pixmap
+        pm_size = pm.size()
+
+        
+        scaled_pm = pm.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+        x_off = (label_size.width()  - scaled_pm.width())  // 2
+        y_off = (label_size.height() - scaled_pm.height()) // 2
+
+        
+        sx = pos.x() - x_off
+        sy = pos.y() - y_off
+        if sx < 0 or sy < 0 or sx >= scaled_pm.width() or sy >= scaled_pm.height():
+            return None  # fora da imagem
+
+        
+        img_w = pm.width()
+        img_h = pm.height()
+        ix = int(sx * img_w / scaled_pm.width())
+        iy = int(sy * img_h / scaled_pm.height())
+        
+        return QPoint(ix, iy)
+
+ 
+        
+    def detect_codecs(self):
+        
+        codecs = self.list_ffmpeg_codecs()
+        if codecs:
+            return codecs
+        else:
+            return self.test_opencv_codecs(["mp4v", "XVID", "MJPG", "H264", "avc1", "DIVX"])
+   
+        
+    def list_ffmpeg_codecs(self):
+        try:
+            result = subprocess.run(["ffmpeg", "-codecs"], 
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                    text=True)
+            codecs = []
+            for line in result.stdout.splitlines():
+                if line.startswith(" "):  # linhas úteis
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        codecs.append(parts[1])
+            return codecs
+        except FileNotFoundError:
+            # print("⚠️ FFmpeg não encontrado no sistema.")
+            return []
+
+    def test_opencv_codecs(self,codecs, output_dir="test_codecs"):
+        
+        os.makedirs(output_dir, exist_ok=True)
+        fps = 10
+        frame_size = (320, 240)
+        frame = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
+
+        available = []
+        for codec in codecs:
+            filename = os.path.join(output_dir, f"test_{codec}.avi")
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(filename, fourcc, fps, frame_size)
+            if writer.isOpened():
+                writer.write(frame)
+                writer.release()
+                if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                    available.append(codec)
+        return available
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+
+
+
+
 
     def sort_images_edf_time(self):
 
@@ -365,42 +994,51 @@ class ImageCropper(QMainWindow):
         concatene_files_scat_back(set_file_1, set_file_2);
 
     def eventFilter(self, obj, event):
-        if obj == self.image_label:
-            if event.type() == QMouseEvent.MouseButtonPress:
-                if event.button() == Qt.LeftButton:
+        
+        
+        if obj == self.image_label and (self.original_image is not None):          
+                
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                mapped = self.label_pos_to_image_pos(event.pos())
+                if mapped is not None:
                     self.drawing = True
-                    self.rect_start = event.pos()
-            elif event.type() == QMouseEvent.MouseMove:
+                    self.rect_start = mapped
+                    self.current_rect = QRect(self.rect_start, self.rect_start)
+                    self.update_image()  
+
+            elif event.type() == QEvent.MouseMove and self.drawing:
+                mapped = self.label_pos_to_image_pos(event.pos())
+                if mapped is not None:
+                    self.current_rect = QRect(self.rect_start, mapped).normalized()
+                    self.update_image()  
+
+            elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
                 if self.drawing:
-                    self.current_rect = QRect(self.rect_start, event.pos()).normalized()
-                    self.update_image()
-            elif event.type() == QMouseEvent.MouseButtonRelease:
-                if event.button() == Qt.LeftButton:
                     self.drawing = False
-                    if not self.current_rect.isNull():
-                        self.update_image()
+                    mapped = self.label_pos_to_image_pos(event.pos())
+                    if mapped is not None:
+                        self.current_rect = QRect(self.rect_start, mapped).normalized()
+                        self.update_image()  
+                        # x, y, w, h = self.current_rect.getRect()
+                        # self.crop_rect = (x, y, w, h)
+        
         return super().eventFilter(obj, event)
+
 
     def crop_image(self):
         
-        if self.current_rect.isNull() or not self.original_image:
-            QMessageBox.warning(self, 'Warning', 'No rectangle drawn for cropping. Please draw rectangle first.')
+        if not hasattr(self, "original_image") or self.original_image is None:
+            QMessageBox.warning(self, "Warning", "No image loaded.")
+            return
+        if not hasattr(self, "current_rect") or self.current_rect.isNull():
+            QMessageBox.warning(self, "Warning", "No rectangle drawn.")
             return
 
-        # Crop the image
         cropped_image = self.original_image.copy(self.current_rect)
-
-        # Saving the cropped image
-        save_path = 'data/';
-        save_path = Path(save_path);
-        save_path = save_path.resolve();
-        save_path = os.path.normpath(save_path);
-        save_path = os.path.join(save_path, 'image_croped.png');
-        save_path = os.path.normpath(save_path);
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        if save_path:
-            cropped_image.save(save_path)
-            self.save_rectangle_coordinates(self.current_rect)
+        save_path = Path("data/image_cropped.png").resolve()
+        os.makedirs(save_path.parent, exist_ok=True)
+        cropped_image.save(str(save_path))
+        self.save_rectangle_coordinates(self.current_rect)
 
 
     def show_image_info(self):
@@ -419,6 +1057,15 @@ class ImageCropper(QMainWindow):
                 f"Time Total (s): {round(self.total_frames/self.fps)} ")
 
         QMessageBox.information(self, 'Information of Image', info)
+        
+        
+    def show_error_message(self, title, message):
+        
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec_()
 
     def calcule_size_drop(self):
         
@@ -440,7 +1087,7 @@ class ImageCropper(QMainWindow):
             for output_field, number in zip([self.int_output1, self.int_output2, self.int_output3], numbers):
                 output_field.setText(f'Number: {number}')
             
-            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_limit = int(numbers[2]), Co = float(numbers[3])  , retangulo = self.ret, print_pdf = print_pdf);
+            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_limit = int(numbers[2]), Co = float(numbers[3]), retangulo = self.ret, print_pdf = print_pdf);
             result_image = set_file_1.read_video();
             if result_image:
                 self.result_image = QPixmap(result_image)
@@ -453,25 +1100,59 @@ class ImageCropper(QMainWindow):
             return;
 
 
-    def update_image(self):
+    def update_image(self, frame=None):
         
-        if self.original_image and self.pixmap:
-            self.image = self.original_image.copy()  # Restore the original image
-            painter = QPainter(self.image)
-            painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
-            if not self.current_rect.isNull():
-                painter.drawRect(self.current_rect)
-            painter.end()
-            self.pixmap = QPixmap.fromImage(self.image)
-            self.image_label.setPixmap(self.pixmap)
+        if frame is not None:
+            self.image = cv2_to_qimage(frame)
+            self.original_image = self.image.copy()
+        elif self.image is None and self.original_image is not None:
+            self.image = self.original_image.copy()
+        elif self.original_image is not None:
+            self.image = self.original_image.copy()
+
+        else:
+            return
+
+        painter = QPainter(self.image)
+        painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
+
+        
+        if hasattr(self, "current_rect") and not self.current_rect.isNull():
+            painter.drawRect(self.current_rect)
+        painter.end()
+
+        self.pixmap = QPixmap.fromImage(self.image)
+        self.image_label.setPixmap(self.pixmap)
+
+        
+        
+#         if self.original_image and self.pixmap:
+#             
+#             self.image = self.original_image.copy()  # Restore the original image
+#             painter = QPainter(self.image)
+#             painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
+#             
+#             if not self.current_rect.isNull():
+#                 painter.drawRect(self.current_rect)
+#                 
+#             painter.end()
+#             self.pixmap = QPixmap.fromImage(self.image)
+#             self.image_label.setPixmap(self.pixmap)
 
     def save_rectangle_coordinates(self, rect):
         
         # Save vertex coordinates to a file
-        x1, y1 = rect.topLeft().x(), rect.topLeft().y()
-        x2, y2 = rect.bottomRight().x(), rect.bottomRight().y()
-        self.ret = [x1, x2, y1,y2]
-        coordinates = f"Vértices do Retângulo: ({x1}, {y1}), ({x2}, {y2})"
+        # x1, y1 = rect.topLeft().x(), rect.topLeft().y()
+        # x2, y2 = rect.bottomRight().x(), rect.bottomRight().y()        
+        # self.ret = [x1, x2, y1,y2]
+        
+        
+        x = self.current_rect.x()
+        y = self.current_rect.y()
+        w = self.current_rect.width()
+        h = self.current_rect.height()
+        self.ret = [x, y, w,h]
+        coordinates = f"Vértice do Retângulo: ({x}, {y}), width ({w}, height {h})"
 
         # Save the coordinates to a text file
         save_path = "data/";
@@ -784,6 +1465,15 @@ def cv_destroy_all_windows_safe():
         pass  # headless
 
 
+def cv2_to_qimage(frame):
+    
+    """Converte frame do OpenCV (BGR) para QImage (RGB)."""
+    rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    h, w, ch = rgb_image.shape
+    bytes_per_line = ch * w
+    
+    return QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+
 def get_dir_paths( **kwargs):
 
     # Create a hidden Tkinter window
@@ -836,10 +1526,10 @@ def get_info_video():
 
     questions = [
         "Type the interval between frames to get the drop size: ",
-        "Type the START pixel value, in the image in X, to select the drop region: ",
-        "Type the END pixel value, in the image in X, to select the drop region: ",
-        "Type the START pixel value, in the image in Y, to select the drop region: ",
-        "Type the END pixel value, in the image in Y, to select the drop region: ",
+        "Type the START pixel value (left bottom), in the image in X EDGE, to select the drop region: ",
+        "Type the START pixel value (left bottom), in the image in Y EDGE, to select the drop region: ",
+        "Type the WIDTH value, in the image, to select the drop region: ",
+        "Type the HEIGHT value, in the image, to select the drop region: ",
         "Type the value of pixel by millimeters: ",
         "Type the maximum video analysis time (s): "
     ]
@@ -929,14 +1619,14 @@ class conc_scat_video:
                     self.Co = (float(str(line[line.index(':')+1:])));
                 if line.find('step_1:') != -1:
                     self.step = round(float(str(line[line.index(':')+1:])));
-                if line.find('start pixel x_1:') != -1:
+                if line.find('left bottom pixel x_1:') != -1:
                     self.start_x = round(float(str(line[line.index(':')+1:])));
-                if line.find('end pixel x_1:') != -1:
-                    self.end_x = round(float(str(line[line.index(':')+1:])));
-                if line.find('start pixel y_1:') != -1:
+                if line.find('left bottom pixel y_1:') != -1:
                     self.start_y = round(float(str(line[line.index(':')+1:])));
-                if line.find('end pixel y_1:') != -1:
-                    self.end_y = round(float(str(line[line.index(':')+1:])));
+                if line.find('width_1:') != -1:
+                    self.width = round(float(str(line[line.index(':')+1:])));
+                if line.find('height_1:') != -1:
+                    self.height = round(float(str(line[line.index(':')+1:])));
                 if line.find('pixel/mm_1:') != -1:
                     self.px_mm = (float(str(line[line.index(':')+1:])));
                     self.px_mm_inv = 1. / self.px_mm
@@ -974,14 +1664,14 @@ class conc_scat_video:
                     self.Co = (float(str(line[line.index(':')+1:])));
                 if line.find('step_2:') != -1:
                     self.step = round(float(str(line[line.index(':')+1:])));
-                if line.find('start pixel x_2:') != -1:
+                if line.find('left bottom pixel x_2:') != -1:
                     self.start_x = round(float(str(line[line.index(':')+1:])));
-                if line.find('end pixel x_2:') != -1:
-                    self.end_x = round(float(str(line[line.index(':')+1:])));
-                if line.find('start pixel y_2:') != -1:
+                if line.find('left bottom pixel y_2:') != -1:
                     self.start_y = round(float(str(line[line.index(':')+1:])));
-                if line.find('end pixel y_2:') != -1:
-                    self.end_y = round(float(str(line[line.index(':')+1:])));
+                if line.find('width_2:') != -1:
+                    self.width = round(float(str(line[line.index(':')+1:])));
+                if line.find('height_2:') != -1:
+                    self.height = round(float(str(line[line.index(':')+1:])));
                 if line.find('pixel/mm_2:') != -1:
                     self.px_mm = (float(str(line[line.index(':')+1:])));
                     self.px_mm_inv = 1. / self.px_mm
@@ -1029,9 +1719,9 @@ class conc_scat_video:
             if 'retangulo' in kwargs:
                 ret = kwargs['retangulo'];
                 self.start_x = ret[0];
-                self.end_x = ret[1];
-                self.start_y = ret[2];
-                self.end_y= ret[3];
+                self.start_y = ret[1];
+                self.width = ret[2];
+                self.height = ret[3];
             if 'print_pdf' in kwargs:
                 self.print_pdf = kwargs['print_pdf'];
             else:
@@ -1200,6 +1890,8 @@ class conc_scat_video:
        
 
         # self.video_c = os.path.getctime(self.file_video);
+        # print(self.file_video)
+        
 
         self.video_m = os.path.getmtime(self.file_video);
 
@@ -1256,14 +1948,16 @@ class conc_scat_video:
         # crop image to restrict background
         new_start_x = self.start_x;
         new_start_y = self.start_y;
-        new_end_x = self.end_x;
-        new_end_y = self.end_y;
-        ref_width = abs(self.end_x - self.start_x);
-        ref_height = abs(self.end_y - self.start_y);
+        ref_end_x = new_end_x = self.start_x + self.width;
+        ref_end_y = new_end_y = self.start_y + self.height;
+        ref_width = abs(self.width);
+        ref_height = abs(self.height);
 
         amplie = False;
         factor = 1;
         start_time = timelib.time()
+        
+        progress = ProgressHandler(self, label="Reading frames...", maximum=total_frames)
 
         while has_frame: # take frame just end of video
 
@@ -1294,18 +1988,18 @@ class conc_scat_video:
                         _w = temp_size_window[data_i-window:data_i,0]; _h = temp_size_window[data_i-window:data_i,1];
                         avg_w = numpy.mean(_w) ;
                         avg_h = numpy.mean(_h) ;
-                        if avg_w < 0.15* abs(self.end_x - self.start_x): avg_w = 0.15 * abs(self.end_x - self.start_x);
-                        if avg_h < 0.15* abs(self.end_y - self.start_y): avg_h =0.15 *abs(self.end_y - self.start_y);
+                        if avg_w < 0.15* abs(ref_end_x - self.start_x): avg_w = 0.15 * abs(ref_end_x - self.start_x);
+                        if avg_h < 0.15* abs(ref_end_y - self.start_y): avg_h =0.15 *abs(ref_end_y - self.start_y);
                         factor_exp = 0.15;
                         new_start_x = int(( x_center - avg_w/2) - (factor_exp * avg_w));
                         new_end_x = int(( x_center + avg_w/2) + (factor_exp * avg_w));
                         if new_start_x < self.start_x: new_start_x = self.start_x;
-                        if new_end_x > self.end_x:  new_end_x = self.end_x;
+                        if new_end_x > ref_end_x:  new_end_x = ref_end_x;
                         ref_width = abs(new_end_x - new_start_x);
                         new_start_y =  int(( y_center - avg_h/2) - (factor_exp * avg_h));
                         new_end_y =  int(( y_center + avg_h/2) + (factor_exp * avg_h));
                         if new_start_y < self.start_y: new_start_y = self.start_y;
-                        if new_end_y > self.end_y: new_end_y = self.end_y;
+                        if new_end_y > ref_end_y: new_end_y = ref_end_y;
                         ref_height = abs(new_end_y - new_start_y);
                         amplie = True;
 
@@ -1314,7 +2008,9 @@ class conc_scat_video:
                 # cv2.imwrite("teste.png",frame); #exit();
                 #crop image
                 imagem = frame[new_start_y:new_end_y, new_start_x:new_end_x];
-                # cv2.imwrite("teste1.png",imagem); #exit();
+                # cv2.imwrite("teste1.png",imagem); #exit();                
+                # cv2.imshow("teste1",imagem)
+               
 
                 img_h, img_w = imagem.shape[:2];
                 if data_i >= 1 or amplie:
@@ -1322,10 +2018,13 @@ class conc_scat_video:
                         factor = 12;
                 new_w = int(img_w * factor)
                 new_h = int(img_h * factor)
+
                 
                 if new_w <= 1 or new_h <= 1:
-                    print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
-                    break
+                    message = f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s."
+                    show_message(self, "Check the video", message, details=None, level="error")
+                    # print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
+                    return None
                 
                 
                 
@@ -1480,13 +2179,20 @@ class conc_scat_video:
 
             frame_count += 1
             elapsed_time = timelib.time() - start_time;
-            print(f"Iteration {frame_count + 1}/{(self.time_limit*fps)}, Elapsed time: {elapsed_time:.2f} seconds", end='\r')
+            print(frame_count, size_data)
+            # print(f"Iteration {frame_count + 1}/{(self.time_limit*fps)}, Elapsed time: {elapsed_time:.2f} seconds", end='\r')
+            progress.update(frame_count, elapsed_time)          
+            if progress.was_canceled():
+                progress.finish()
+                print("Process canceled by user.")
+                return None
             
             has_frame, frame = video.read()
 
-
+        progress.finish()
         file_data_imgs.close();
-
+        
+        
         new_data_time_size = delete_value_extrem(data_time_size);
         self.coef_pol_w = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 1],12);
         self.coef_pol_h = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 2],12);
@@ -1513,9 +2219,74 @@ class conc_scat_video:
 
         if self.print_pdf:
             self.print_frames_pdf(path_dir_imgs, file_image_str)
-            
+        
 
         return file_out
+
+
+
+class ProgressHandler:
+
+    def __init__(self, parent=None, label="Processing...", maximum=100):
+        
+        self.parent = parent
+        self.maximum = maximum
+        self.current = 0
+        self.use_gui = False
+        self.progress = None
+
+        # Detecta se GUI está ativa
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                # Tenta criar mesmo sem parent QWidget
+                if isinstance(parent, QWidget):
+                    self.progress = QProgressDialog(label, "Cancel", 0, maximum, parent)
+                else:
+                    self.progress = QProgressDialog(label, "Cancel", 0, maximum)
+                self.progress.setWindowTitle("Please wait")
+                self.progress.setWindowModality(Qt.WindowModal)
+                self.progress.setMinimumDuration(0)
+                self.progress.setValue(0)
+                self.use_gui = True
+            except Exception as e:
+                print(f"[ProgressHandler] ⚠️ Falling back to terminal mode: {e}")
+                self.use_gui = False
+        else:
+            self.use_gui = False
+
+    def update(self, value, elapsed=None):
+        """Atualiza o progresso (GUI ou terminal)"""
+        self.current = value
+        if self.use_gui and self.progress:
+            self.progress.setValue(value)
+            QApplication.processEvents()
+        else:
+            if elapsed is not None:
+                print(
+                    f"Iteration {value}/{self.maximum}, Elapsed time: {elapsed:.2f} seconds",
+                    end="\r"
+                )
+            else:
+                print(f"Progress: {value}/{self.maximum}", end="\r")
+
+    def was_canceled(self):
+        """Verifica se o usuário cancelou (apenas GUI)"""
+        if self.use_gui and self.progress:
+            return self.progress.wasCanceled()
+        return False
+
+    def finish(self):
+        """Finaliza o progresso"""
+        if self.use_gui and self.progress:
+            self.progress.setValue(self.maximum)
+            QApplication.processEvents()  # 🔹 força atualização final
+            self.progress.close()         # 🔹 fecha explicitamente o diálogo
+            QApplication.processEvents()  # 🔹 garante que o fechamento seja processado
+        else:
+            print()
+
+
 
 
 def menu():
@@ -1528,25 +2299,6 @@ def menu():
 
 
 
-def draw_square(event, x, y, flags, param, imagem):
-
-
-    vertices = []
-
-    imagem = cv2.imread('sample.jpg')
-
-    if event == cv2.EVENT_LBUTTONDOWN:
-        vertices.append((x, y))
-
-        if len(vertices) == 2:
-            # Draw the square on the original image
-            cv2.rectangle(imagem, vertices[0], vertices[1], (255, 0, 0), 5)  # Blue with thickness 2
-            cv_imshow_safe("Imagem", imagem) # cv2.imshow('Imagem', imagem)            
-            vertices.clear()
-
-
-    for i, vertice in enumerate(vertices):
-        print(f"Vértice {i + 1}: {vertice}")
 
 def save_data_video(data_in, coef_w, coef_h, coef_area, coef_conc, output_file):
 
@@ -1585,6 +2337,42 @@ def save_data_edf(data_in, output_file, option):
             str_ = f"{i_data['file']}, {i_data['date']}, {float(i_data['start_time']):.2f} \n";
         file_op.write(str_);
     file_op.close()
+    
+    
+def show_message(self, title, message, details=None, level="error"):
+
+    import traceback
+    import sys
+    from PyQt5.QtWidgets import QMessageBox, QApplication
+
+    app = QApplication.instance()  # verifica se a GUI está ativa
+
+    if app is not None:
+
+        msg = QMessageBox(self if hasattr(self, "windowTitle") else None)
+        if level.lower() == "error":
+            msg.setIcon(QMessageBox.Critical)
+        elif level.lower() == "warning":
+            msg.setIcon(QMessageBox.Warning)
+        else:
+            msg.setIcon(QMessageBox.Information)
+
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        if details:
+            msg.setDetailedText(details)
+        msg.exec_()
+    else:
+
+        print(f"\n{'='*60}")
+        print(f"[{level.upper()}] {title}")
+        print(f"→ {message}")
+        if details:
+            print("-" * 60)
+            print(details)
+            print("-" * 60)
+        print(f"{'='*60}\n")
+
 
 def read_file_video(input_file):
 
@@ -1642,4 +2430,108 @@ def calcule_surface_spheroide(edge_1, edge_2):
         e = np.sqrt(1.0 - (edge_1*edge_1)/(edge_2*edge_2))           # 0 < e < 1
         return 2.0 * np.pi * edge_1*edge_1 * (1.0 + (edge_2/(edge_1*e)) * np.arcsin(e))
     
+
+
+def _int_to_fourcc(v: int) -> str:
+    if not v:
+        return ""
+    chars = []
+    for i in range(4):
+        chars.append(chr((v >> (8 * i)) & 0xFF))
+    s = "".join(chars)
+    if not s.isprintable():
+        return ""
+    return s
+
+
+def _default_fourcc_candidates_for_ext(ext: str) -> List[str]:
+    ext = ext.lower()
+    # Reasonable candidates given typical OpenCV/FFmpeg builds (no guarantee)
+    if ext in (".mp4", ".m4v", ".mov"):
+        return ["mp4v", "avc1", "h264"]  # mp4v is most portable in OpenCV wheels
+    if ext == ".avi":
+        return ["MJPG", "XVID", "mp4v"]
+    if ext == ".mkv":
+        return ["mp4v", "MJPG", "XVID"]
+    # Very uncommon/unsupported for writing via OpenCV:
+    if ext == ".flv":
+        return []  # force user to change container
+    return ["mp4v"]
+
+
+def _pick_writer_fourcc(cap: cv2.VideoCapture, out_path: str, user_codec: Optional[str]) -> List[str]:
+    ext = os.path.splitext(out_path)[1].lower()
+    # If user forces a codec, try it first
+    candidates: List[str] = []
+    if user_codec:
+        candidates.append(user_codec)
+
+    # Try to reuse detected codec (rarely usable for writing, but try)
+    detected = _int_to_fourcc(int(cap.get(cv2.CAP_PROP_FOURCC)))
+    if detected and detected.strip("\x00").strip():
+        candidates.append(detected)
+
+    # Add common candidates for the chosen extension
+    candidates += _default_fourcc_candidates_for_ext(ext)
+
+    # Finally, add a few generic fallbacks
+    for fallback in ("mp4v", "MJPG", "XVID", "avc1"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    # Remove empties/dupes while preserving order
+    seen = set()
+    out = []
+    for c in candidates:
+        c = (c or "").strip()
+        if not c:
+            continue
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def parse_drop_spec(spec: str, total_frames: int) -> Set[int]:
+    if not spec:
+        return set()
+    result: Set[int] = set()
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            a, b = chunk.split("-", 1)
+            a = a.strip()
+            b = b.strip()
+            if not a.isdigit() or not b.isdigit():
+                raise ValueError(f"Invalid range '{chunk}' in --drop spec")
+            start = int(a)
+            end = int(b)
+            if start > end:
+                start, end = end, start
+            for i in range(start, end + 1):
+                if 0 <= i < total_frames:
+                    result.add(i)
+        else:
+            if not chunk.isdigit():
+                raise ValueError(f"Invalid index '{chunk}' in --drop spec")
+            i = int(chunk)
+            if 0 <= i < total_frames:
+                result.add(i)
+    return result
+
+def _open_writer_any(tmp_out_path: str, fps: float, size: Tuple[int, int], candidates: List[str]) -> Tuple[Optional[cv2.VideoWriter], Optional[str]]:
     
+
+    for c in candidates:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*c)
+            w = cv2.VideoWriter(tmp_out_path, fourcc, fps, size)
+            if w.isOpened():
+                return w, c
+            # release and try next
+            w.release()
+        except Exception:
+            pass
+    return None, None
