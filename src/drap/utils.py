@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import (QApplication, QProgressDialog, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, 
                              QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QSlider, QDialog, QDialogButtonBox,
-                             QComboBox)
+                             QComboBox, QGridLayout, QSpinBox)
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor
-from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo, QTimer, QEvent
+from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo, QTimer, QEvent, QSize
 from fabio.edfimage import EdfImage
 import tkinter as tk
 from tkinter import filedialog
@@ -105,8 +105,8 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        self.test = True
-        # self.test = False
+        # self.test = True
+        self.test = False
         # print("teste")
         
         
@@ -140,7 +140,7 @@ class ImageCropper(QMainWindow):
         # Layout de controles do player de vídeo (abaixo do vídeo)
         self.video_controls_layout = QVBoxLayout()
         self.image_layout.addLayout(self.video_controls_layout)
-        
+              
         # progress bar
         self.video_slider = QSlider(Qt.Horizontal)
         self.video_bar_time_layout.addWidget(self.video_slider)
@@ -150,8 +150,19 @@ class ImageCropper(QMainWindow):
         self.time_label = QLabel('00:00 / 00:00')
         self.video_bar_time_layout.addWidget(self.time_label)   
         
+        self.info_labels_layout = QHBoxLayout()
         self.mouse_label = QLabel('Mouse: (0,0)')
-        self.video_bar_time_layout.addWidget(self.mouse_label)
+        self.image_size_label = QLabel("Image size: 0 x 0")
+        
+        self.info_labels_layout.addWidget(self.mouse_label)
+        self.info_labels_layout.addWidget(self.image_size_label)
+        self.info_labels_layout.addStretch()
+
+
+        self.video_bar_time_layout.addLayout(self.info_labels_layout)
+       
+        
+        # self.video_bar_time_layout.addWidget(self.image_size_label)
         
         # Timer para reprodução de vídeo
         self.video_timer = QTimer()
@@ -204,6 +215,41 @@ class ImageCropper(QMainWindow):
 
         self.speed_slider.valueChanged.connect(self.update_speed)
         
+        
+                # === Painel de coordenadas do retângulo ===
+        self.rect_group = QGroupBox("Rectangle Position and Size")
+        self.rect_layout = QGridLayout()
+        self.rect_group.setLayout(self.rect_layout)
+
+        # Cria os 4 campos (x, y, largura, altura)
+        self.rect_x_spin = QSpinBox()
+        self.rect_y_spin = QSpinBox()
+        self.rect_w_spin = QSpinBox()
+        self.rect_h_spin = QSpinBox()
+
+        # Rótulos
+        self.rect_layout.addWidget(QLabel("X:"), 0, 0)
+        self.rect_layout.addWidget(self.rect_x_spin, 0, 1)
+        self.rect_layout.addWidget(QLabel("Y:"), 0, 2)
+        self.rect_layout.addWidget(self.rect_y_spin, 0, 3)
+        self.rect_layout.addWidget(QLabel("Width:"), 1, 0)
+        self.rect_layout.addWidget(self.rect_w_spin, 1, 1)
+        self.rect_layout.addWidget(QLabel("Height:"), 1, 2)
+        self.rect_layout.addWidget(self.rect_h_spin, 1, 3)
+
+        # Adiciona ao layout principal lateral
+        self.video_controls_layout.addWidget(self.rect_group)
+
+        # Limites padrão (atualizados quando o vídeo é carregado)
+        for spin in [self.rect_x_spin, self.rect_y_spin, self.rect_w_spin, self.rect_h_spin]:
+            spin.setRange(0, 9999)
+            spin.setSingleStep(1)
+
+        # Conectar mudanças dos campos ao redesenho do retângulo
+        self.rect_x_spin.valueChanged.connect(self.update_rect_from_spinboxes)
+        self.rect_y_spin.valueChanged.connect(self.update_rect_from_spinboxes)
+        self.rect_w_spin.valueChanged.connect(self.update_rect_from_spinboxes)
+        self.rect_h_spin.valueChanged.connect(self.update_rect_from_spinboxes)
         
         
         
@@ -323,8 +369,8 @@ class ImageCropper(QMainWindow):
         if self.test: 
             self.load_image()
             self.int_input1.setText("45.") 
-            self.int_input2.setText("10") 
-            self.int_input3.setText("1000") 
+            self.int_input2.setText("1") 
+            self.int_input3.setText("25") 
             self.int_input4.setText("1.0") 
 
         self.show()
@@ -337,7 +383,8 @@ class ImageCropper(QMainWindow):
 
         
         if self.test: 
-            self.file_path = "/home/standard02/Documents/programming/python/bolhas/test/2024-07-10-water-without-absolute-intensity.flv"
+            self.file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste.mp4"
+            # "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste_completo.mp4" teste_bolha.mp4
             # self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
         else:
             self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
@@ -379,9 +426,30 @@ class ImageCropper(QMainWindow):
         self.image = qimg.copy()
         self.pixmap = QPixmap.fromImage(self.image)
         self.image_label.setPixmap(self.pixmap) #show image
+        self.image_label.adjustSize()
+        self.original_image = self.pixmap.toImage()
         # self.image_label.setScaledContents(True)
+        self.image_label.setScaledContents(False)
+        self.image_label.setAlignment(Qt.AlignCenter)
+
+        
+        self.image_width = self.pixmap.width()
+        self.image_height = self.pixmap.height()
+        self.update_rect_limits()
+
         self.current_rect = QRect() 
-        self.update_image() 
+        self.update_image()         
+        self.img_size = [frame.shape[1], frame.shape[0]]
+        
+        self.image_size_label.setText(f"Image size: {self.img_size[1]} × {self.img_size[0]}")
+        
+        # Limitar X e Y dentro dos limites da imagem
+        self.rect_x_spin.setRange(0, self.img_size[0] - 1 )
+        self.rect_y_spin.setRange(0, self.img_size[1] - 1 )
+
+        # Limitar largura e altura para não ultrapassar o tamanho da imagem
+        self.rect_w_spin.setRange(0, self.img_size[0] - self.rect_x_spin.value())
+        self.rect_h_spin.setRange(0, self.img_size[1] - self.rect_y_spin.value())
 
         # Reseta variáveis de estado
         self.fps = int(self.video.get(cv2.CAP_PROP_FPS))
@@ -485,8 +553,12 @@ class ImageCropper(QMainWindow):
         self.image = q_image.copy()
         self.pixmap = QPixmap.fromImage(self.image)
         self.image_label.setPixmap(self.pixmap)
-        
-        self.update_image()
+        self.image_label.adjustSize()
+        self.image_label.setPixmap(self.pixmap)
+        self.image_width = w
+        self.image_height = h
+        self.update_rect_limits()
+        # self.update_image()
 
 
 
@@ -505,7 +577,7 @@ class ImageCropper(QMainWindow):
         
         current_time = self.current_frame / self.fps if self.fps else 0
         total_time = self.total_frames / self.fps if self.fps else 0
-        time_str = f"{self.format_time(current_time)} ({self.current_frame} frame) / {self.format_time(total_time)} min"
+        time_str = f"{self.format_time(current_time)} min  / {self.format_time(total_time)} min ({current_time:.2f} s -  frame: {self.current_frame})"
         self.time_label.setText(time_str)
 
     def format_time(self, seconds):
@@ -569,7 +641,7 @@ class ImageCropper(QMainWindow):
         layout.addWidget(end_input)
 
         # keep decider when the frame will save
-        keep_decider_label = QLabel("Output FPS:")
+        keep_decider_label = QLabel("Keep frames each second:")
         keep_decider_input = QLineEdit(str(self.fps))
         layout.addWidget(keep_decider_label)
         layout.addWidget(keep_decider_input)
@@ -621,26 +693,18 @@ class ImageCropper(QMainWindow):
         
         w_in = int(video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
         h_in = int(video_in.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        display_w = self.image_label.width()
-        display_h = self.image_label.height()
-        scale_x = w_in / display_w
-        scale_y = h_in / display_h  
  
         
         if crop_rect is not None:
             x, y, w_out, h_out = crop_rect
-            x = int(x * scale_x)
-            y = int(y * scale_y)
-            w_out = int(w_out * scale_x)
-            h_out = int(h_out * scale_y)
-
-            # x = max(0, min(x, w_in - 1))
-            # y = max(0, min(y, h_in - 1))
-            # w_out = min(w_out, w_in - x)
-            # h_out = min(h_out, h_in - y)
+            x = max(0, min(x, w_in - 1))
+            y = max(0, min(y, h_in - 1))
+            w_out = min(w_out, w_in - x)
+            h_out = min(h_out, h_in - y)
+            
         else:
-            w_out = w_in
-            h_out = h_in
+            x, y = 0, 0
+            w_out, h_out = w_in, h_in
             
         size = (abs(w_out), abs(h_out))
 
@@ -774,28 +838,21 @@ class ImageCropper(QMainWindow):
             return None
 
         label_size = self.image_label.size()
-        pm = self.pixmap
-        pm_size = pm.size()
+        pixmap_size = self.pixmap.size()
 
-        
-        scaled_pm = pm.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # Calcula o offset (bordas pretas) se a imagem estiver centralizada
+        x_offset = max((label_size.width() - pixmap_size.width()) // 2, 0)
+        y_offset = max((label_size.height() - pixmap_size.height()) // 2, 0)
 
-        x_off = (label_size.width()  - scaled_pm.width())  // 2
-        y_off = (label_size.height() - scaled_pm.height()) // 2
+        # Remove o deslocamento
+        x = pos.x() - x_offset
+        y = pos.y() - y_offset
 
-        
-        sx = pos.x() - x_off
-        sy = pos.y() - y_off
-        if sx < 0 or sy < 0 or sx >= scaled_pm.width() or sy >= scaled_pm.height():
-            return None  # fora da imagem
-
-        
-        img_w = pm.width()
-        img_h = pm.height()
-        ix = int(sx * img_w / scaled_pm.width())
-        iy = int(sy * img_h / scaled_pm.height())
-        
-        return QPoint(ix, iy)
+        # Garante que está dentro da imagem
+        if 0 <= x < pixmap_size.width() and 0 <= y < pixmap_size.height():
+            return QPoint(x, y)
+        else:
+            return None
 
  
         
@@ -995,34 +1052,46 @@ class ImageCropper(QMainWindow):
 
     def eventFilter(self, obj, event):
         
-        
-        if obj == self.image_label and (self.original_image is not None):          
-                
+        if obj == self.image_label and (self.original_image is not None):
+            
+            # Atualiza posição do mouse (mesmo sem clicar)
+            if event.type() == QEvent.MouseMove:
+                pos = event.pos()
+                mapped = self.label_pos_to_image_pos(pos)
+                if mapped:
+                    self.mouse_label.setText(f"Mouse: ({mapped.x()}, {mapped.y()})")
+
+            # Início do desenho do retângulo
             if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
                 mapped = self.label_pos_to_image_pos(event.pos())
                 if mapped is not None:
                     self.drawing = True
                     self.rect_start = mapped
-                    self.current_rect = QRect(self.rect_start, self.rect_start)
-                    self.update_image()  
+                    self.current_rect = QRect(self.rect_start, QSize())
+                    self.update_image()  # desenha imediatamente, sem atualizar limites
+                    self.update_spinboxes_from_rect()
 
-            elif event.type() == QEvent.MouseMove and self.drawing:
+            # Movimento do mouse durante o desenho
+            elif event.type() == QEvent.MouseMove and getattr(self, "drawing", False):
                 mapped = self.label_pos_to_image_pos(event.pos())
                 if mapped is not None:
                     self.current_rect = QRect(self.rect_start, mapped).normalized()
-                    self.update_image()  
+                    self.update_image()  # redesenha em tempo real (não mexe nos spinboxes ainda)
 
+            # Soltar o botão: finalize o desenho
             elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-                if self.drawing:
-                    self.drawing = False
+                if getattr(self, "drawing", False):
+                    # self.drawing = False
                     mapped = self.label_pos_to_image_pos(event.pos())
                     if mapped is not None:
                         self.current_rect = QRect(self.rect_start, mapped).normalized()
-                        self.update_image()  
-                        # x, y, w, h = self.current_rect.getRect()
-                        # self.crop_rect = (x, y, w, h)
-        
+                        self.update_image()  # mantém o desenho visível
+                        self.update_spinboxes_from_rect()  # atualiza campos
+                        self.update_rect_limits()  # aplica os limites só no final
+                        self.drawing = False
+
         return super().eventFilter(obj, event)
+
 
 
     def crop_image(self):
@@ -1075,7 +1144,7 @@ class ImageCropper(QMainWindow):
         else:
             print_pdf = False
         
-        if hasattr(self,  'ret'):
+        if hasattr(self,  'ret') and self.ret is not None:
             pass;
         else:
             QMessageBox.warning(self, '', 'No rectangle drawn for cropping. Please draw rectangle first and cut the image.')
@@ -1091,13 +1160,132 @@ class ImageCropper(QMainWindow):
             result_image = set_file_1.read_video();
             if result_image:
                 self.result_image = QPixmap(result_image)
-                self.original_image = self.result_image.toImage()
                 self.image = self.result_image.toImage()
-                self.result_label.setPixmap(QPixmap.fromImage(self.original_image))
-                self.result_label.setScaledContents(True)
+                self.result_label.setPixmap(QPixmap.fromImage(self.image))
+                # self.result_label.setScaledContents(True)
         else:
             QMessageBox.warning(self, 'Warning', 'Please Fill the forms.')
             return;
+
+    def update_rect_from_spinboxes(self):
+        """Atualiza o retângulo quando o usuário muda os valores manualmente."""
+        if not hasattr(self, "current_rect"):
+            self.current_rect = QRect()
+
+        # Se o usuário estiver desenhando, ignore alterações manuais temporariamente
+        if getattr(self, "drawing", False):
+            return
+        
+        if not hasattr(self, "pixmap") or self.pixmap.isNull():
+            return
+        
+        img_width = self.pixmap.width()
+        img_height = self.pixmap.height()
+
+        x = self.rect_x_spin.value()
+        y = self.rect_y_spin.value()
+        w = self.rect_w_spin.value()
+        h = self.rect_h_spin.value()
+
+        #  Ajusta se ultrapassar a borda direita ou inferior
+        if x + w > img_width:
+            w = img_width - x
+            self.rect_w_spin.blockSignals(True)
+            self.rect_w_spin.setValue(w)
+            self.rect_w_spin.blockSignals(False)
+
+        if y + h > img_height:
+            h = img_height - y
+            self.rect_h_spin.blockSignals(True)
+            self.rect_h_spin.setValue(h)
+            self.rect_h_spin.blockSignals(False)
+
+        # 🔹 Garante que x, y não fiquem fora da imagem
+        if x < 0:
+            x = 0
+            self.rect_x_spin.blockSignals(True)
+            self.rect_x_spin.setValue(0)
+            self.rect_x_spin.blockSignals(False)
+
+        if y < 0:
+            y = 0
+            self.rect_y_spin.blockSignals(True)
+            self.rect_y_spin.setValue(0)
+            self.rect_y_spin.blockSignals(False)
+
+        # 🔹 Atualiza o retângulo e redesenha
+        self.current_rect = QRect(x, y, w, h)
+        self.update_image()
+
+    
+    
+    def update_spinboxes_from_rect(self):
+        """Atualiza os campos (x, y, largura, altura) com base no retângulo atual desenhado."""
+        if not hasattr(self, "current_rect") or self.current_rect.isNull():
+            return
+
+        rect = self.current_rect
+
+        # Evita loops infinitos de sinal: desliga os sinais temporariamente
+        self.rect_x_spin.blockSignals(True)
+        self.rect_y_spin.blockSignals(True)
+        self.rect_w_spin.blockSignals(True)
+        self.rect_h_spin.blockSignals(True)
+
+        # Atualiza os valores dos campos com o retângulo atual
+        self.rect_x_spin.setValue(rect.x())
+        self.rect_y_spin.setValue(rect.y())
+        self.rect_w_spin.setValue(rect.width())
+        self.rect_h_spin.setValue(rect.height())
+
+        # Reativa os sinais
+        self.rect_x_spin.blockSignals(False)
+        self.rect_y_spin.blockSignals(False)
+        self.rect_w_spin.blockSignals(False)
+        self.rect_h_spin.blockSignals(False)
+
+    def update_rect_limits(self):
+        
+
+        if not hasattr(self, "pixmap") or self.pixmap.isNull():
+            return
+        
+        # Se o usuário está desenhando, não interfere
+        if getattr(self, "drawing", False):
+            return
+
+        img_width = getattr(self, "image_width", self.pixmap.width())
+        img_height = getattr(self, "image_height", self.pixmap.height())
+
+        x = self.rect_x_spin.value()
+        y = self.rect_y_spin.value()
+        w = self.rect_w_spin.value()
+        h = self.rect_h_spin.value()
+
+        # Define novos limites
+        self.rect_x_spin.setRange(0, img_width - 1)
+        self.rect_y_spin.setRange(0, img_height - 1)
+        self.rect_w_spin.setRange(1, img_width - x)
+        self.rect_h_spin.setRange(1, img_height - y)
+
+        # Se os valores atuais de largura/altura ultrapassarem os limites, reduza automaticamente
+        if x + w > img_width:
+            self.rect_w_spin.setValue(img_width - x)
+            self.rect_w_spin.blockSignals(True)
+            self.rect_w_spin.setValue(img_width - x)
+            self.rect_w_spin.blockSignals(False)
+
+        if y + h > img_height:
+            self.rect_h_spin.setValue(img_height - y)
+            self.rect_h_spin.blockSignals(True)
+            self.rect_h_spin.setValue(img_height - y)
+            self.rect_h_spin.blockSignals(False)
+
+        # Só atualiza o retângulo se o usuário não estiver desenhando com o mouse
+        if not getattr(self, "drawing", False):
+            self.current_rect = QRect(x, y, self.rect_w_spin.value(), self.rect_h_spin.value())
+            self.update_image()
+
 
 
     def update_image(self, frame=None):
@@ -2145,6 +2333,7 @@ class conc_scat_video:
                     data_time_size[data_i][0] = time; # time
                     data_time_size[data_i][1] = (width / 2.) / (self.px_mm ); # width -> semi axes 
                     data_time_size[data_i][2] = (height/ 2.) / (self.px_mm); # height -> semi axes 
+                   
                     if data_i == 0: 
                         self.Vo = calcule_vol_spheroide(data_time_size[data_i][1], data_time_size[data_i][2] ) / 1000. # use in mL
                     temp = datetime.fromtimestamp(self.video_m) + timedelta(seconds=time);
@@ -2171,7 +2360,7 @@ class conc_scat_video:
                     #     temp_m[flag_temp,1] = temp_m[flag_temp,1] - 1
                         # if temp_m[flag_temp,1] < 1: flag_temp = flag_temp + 1;
                         
-                        
+                    
 
                 data_i = data_i +1;
                 # cv2.imshow("image fim", imagem)
@@ -2184,7 +2373,7 @@ class conc_scat_video:
             progress.update(frame_count, elapsed_time)          
             if progress.was_canceled():
                 progress.finish()
-                print("Process canceled by user.")
+                # print("Process canceled by user.")
                 return None
             
             has_frame, frame = video.read()
@@ -2194,10 +2383,12 @@ class conc_scat_video:
         
         
         new_data_time_size = delete_value_extrem(data_time_size);
+        
         self.coef_pol_w = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 1],12);
         self.coef_pol_h = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 2],12);
         self.coef_pol_area = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 6],12);
         self.coef_pol_conc = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 7],12);
+  
         
 
 
@@ -2205,6 +2396,7 @@ class conc_scat_video:
         file_out = os.path.join(path_dir_imgs,self.name_file+'_Video_time_size.csv');
         file_out = os.path.normpath(file_out);
         save_data_video(new_data_time_size,self.coef_pol_w, self.coef_pol_h, self.coef_pol_area, self.coef_pol_conc, file_out);
+        
 
 
         file_out = os.path.join(path_dir_imgs,self.name_file+'_sizes.png');
@@ -2311,9 +2503,11 @@ def save_data_video(data_in, coef_w, coef_h, coef_area, coef_conc, output_file):
     file_op.write(f"Coeficient concentration: {', '.join([f'{i_coef:.7e}' for i_coef in coef_conc])}\n")
     file_op.write("Frame,dropDX(mm),dropDY(mm),surface(mm^2),Volume(\u03bcL),RelativeConcentration(%),date,time(s),time(min)\n")
 
+
     for i_data in range(0, len(data_in)):
         
-        str_ = f"{int(data_in[i_data,4]):>5d}, {data_in[i_data,1]:.2f}, {data_in[i_data,2]:.3e},  {data_in[i_data,6]:.3e}, {data_in[i_data,8]:.3e}, {data_in[i_data,7]:.3e}, {datetime.fromtimestamp(data_in[i_data,3]).strftime('%Y-%m-%d %H:%M:%S')}, {data_in[i_data,0]:.2f}, {data_in[i_data,4]:.2f} \n";
+        
+        str_ = f"{int(data_in[i_data,4]):>5d}, {data_in[i_data,1]:.3e}, {data_in[i_data,2]:.3e},  {data_in[i_data,6]:.3e}, {data_in[i_data,8]:.3e}, {data_in[i_data,7]:.3e}, {datetime.fromtimestamp(data_in[i_data,3]).strftime('%Y-%m-%d %H:%M:%S')}, {data_in[i_data,0]:.2f}, {data_in[i_data,4]:.2f} \n";
 
         file_op.write(str_);
     file_op.close()
