@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QApplication, QProgressDialog, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, 
-                             QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QSlider, QDialog, QDialogButtonBox,
+                             QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QRadioButton, QSlider, QDialog, QDialogButtonBox,
                              QComboBox, QGridLayout, QSpinBox)
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor, QDoubleValidator
 from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo, QTimer, QEvent, QSize
 from fabio.edfimage import EdfImage
 import tkinter as tk
@@ -604,13 +604,13 @@ class ImageCropper(QMainWindow):
         dlg = CodecDialog(available_codecs)
         if dlg.exec_() == QDialog.Accepted:
             codec, ext = dlg.get_selection()
-            # print(f"✅ Codec escolhido: {codec}, Extensão: {ext}")
+            # print(f"â Codec escolhido: {codec}, ExtensÃ£o: {ext}")
 
 
             # fourcc = cv2.VideoWriter_fourcc(*codec)
             # out = cv2.VideoWriter("saida" + ext, fourcc, fps, (width, height))
         
-        # Diálogo para escolher onde salvar o vídeo
+        # DiÃ¡logo para escolher onde salvar o vÃ­deo
         save_path, _ = QFileDialog.getSaveFileName(self, "Save Video As", "", f"Video Files {codec}")
         base, ext = os.path.splitext(self.file_path)
         out_ext = out_ext = os.path.splitext(save_path)[1].lower()
@@ -623,7 +623,7 @@ class ImageCropper(QMainWindow):
             save_path = (save_path + out_ext)
             
 
-        # Widgets para escolher parâmetros
+        # Widgets para escolher parÃ¢metros
         dialog = QDialog(self)
         dialog.setWindowTitle("Export Video Settings")
         layout = QVBoxLayout(dialog)
@@ -631,46 +631,115 @@ class ImageCropper(QMainWindow):
         # Frame inicial
         start_label = QLabel("Start Frame:")
         start_input = QLineEdit(str(self.current_frame))
+        validator_start = QDoubleValidator(0.0, self.current_frame, 0)
+        start_input.setValidator(validator_start)
         layout.addWidget(start_label)
         layout.addWidget(start_input)
 
         # Frame final
         end_label = QLabel("End Frame:")
         end_input = QLineEdit(str(self.total_frames - 1))
+        validator_end = QDoubleValidator(0.0, self.total_frames - 1, 0)
+        end_input.setValidator(validator_end)
         layout.addWidget(end_label)
         layout.addWidget(end_input)
+        
+        # OpÃ§Ãµes exclusivas de exporta
+        option_label = QLabel("Choose export mode:")
+        layout.addWidget(option_label)
+
+        # Radio buttons
+        keep_frames_radio = QRadioButton("Keep frames each second")
+        reduce_time_radio = QRadioButton("Reduce total time")
+        keep_frames_radio.setChecked(True)
+        layout.addWidget(keep_frames_radio)
+        layout.addWidget(reduce_time_radio)
 
         # keep decider when the frame will save
         keep_decider_label = QLabel("Keep frames each second:")
         keep_decider_input = QLineEdit(str(self.fps))
+        validator_fps = QDoubleValidator(0.0, self.fps, 0)
+        keep_decider_input.setValidator(validator_fps)
         layout.addWidget(keep_decider_label)
         layout.addWidget(keep_decider_input)
+        
+        change_final_time_label = QLabel("New total duration (seconds):")
+        change_final_time_input = QLineEdit(f"{self.duration_sec:.2f}")
+        validator_time = QDoubleValidator(0.0, self.duration_sec, 2)
+        change_final_time_input.setValidator(validator_time)
+        layout.addWidget(change_final_time_label)
+        layout.addWidget(change_final_time_input)
+        
+        
+        # Inicialmente esconde o segundo campo
+        change_final_time_label.hide()
+        change_final_time_input.hide()
+        
+        def toggle_fields():
+            if keep_frames_radio.isChecked():
+                keep_decider_label.show()
+                keep_decider_input.show()
+                change_final_time_label.hide()
+                change_final_time_input.hide()
+            else:
+                keep_decider_label.hide()
+                keep_decider_input.hide()
+                change_final_time_label.show()
+                change_final_time_input.show()
+                
+        # Conecta eventos
+        keep_frames_radio.toggled.connect(toggle_fields)
+        reduce_time_radio.toggled.connect(toggle_fields)
+                  
+        
+        # keep_time_checkbox = QCheckBox("Keep Total Time")
+        # keep_time_checkbox.setChecked(True)  # padrÃ£o: marcado
+        # layout.addWidget(keep_time_checkbox)
+        
 
-
-        # Botões
+        # BotÃµes
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addWidget(button_box)
 
 
-        button_box.accepted.connect(lambda: self.export_video(
-            self.file_path,
-            save_path,
-            codec,
-            int(start_input.text()),
-            int(end_input.text()),
-            int(keep_decider_input.text()),
-            self.ret,
-            None
-            ))
+       
+        def on_accept():
+            try:
+                start_f = int(start_input.text())
+                end_f = int(end_input.text())
+                fps_keep = int(keep_decider_input.text())
+                total_time = float(change_final_time_input.text())
+
+                if reduce_time_radio.isChecked() and total_time > self.duration_sec:
+                    self.show_message( "Error", "The final time of output video must be equal or less than the original duration.", level="error")
+                    return
+                
+
+                self.export_video(
+                    self.file_path,
+                    save_path,
+                    codec,
+                    start_f,
+                    end_f,
+                    fps_keep,
+                    self.ret,
+                    total_time if reduce_time_radio.isChecked() else None,
+                    None
+                )
+                dialog.accept()
+
+            except ValueError:
+                show_message(self, "Error", "Please enter valid numeric values.", level="error")
+
         # crop_rect=(100, 50, 400, 300)  
-        button_box.accepted.connect(dialog.accept)
+        button_box.accepted.connect(on_accept)
         button_box.rejected.connect(dialog.reject)
 
         dialog.exec_()  
    
    
    
-    def export_video (self, in_path, out_path, codec, cut_first=0, cut_last=0, keep_decider=None, crop_rect=None, to_drop=None,):
+    def export_video (self, in_path, out_path, codec, cut_first=0, cut_last=0, keep_decider=None, crop_rect=None, change_final_time= None, to_drop=None,):
         
         video_in = cv2.VideoCapture(in_path)        
         
@@ -708,22 +777,33 @@ class ImageCropper(QMainWindow):
             
         size = (abs(w_out), abs(h_out))
 
-        
-        
-        kept = 0
-        for idx in range(start, end):
-            if to_drop and idx in to_drop:
-                continue
-            if keep_decider and idx % keep_decider != 0:
-                continue
-            kept += 1
+       
+        if change_final_time is None:
+            kept = 0
+            for idx in range(start, end):
+                if to_drop and idx in to_drop:
+                    continue
+                if keep_decider and idx % keep_decider != 0:
+                    continue
+                kept += 1
 
-        if kept == 0:
-            raise RuntimeError("No frames selected for export!")     
-        
-        total_considered = end - start
-        fps_out = fps_in * (kept / total_considered)
-        # print(f"FPS adjusted: {fps_in:.2f} → {fps_out:.2f} (keeped {kept}/{total_considered})")
+            if kept == 0:
+                raise RuntimeError("No frames selected for export!")     
+            
+            total_considered = end - start
+            fps_out = fps_in * (kept / total_considered)
+                # print(f"FPS adjusted: {fps_in:.2f} â {fps_out:.2f} (keeped {kept}/{total_considered})")
+        else:
+            fps_out = 30
+            total_considered = end - start
+            total_frames = change_final_time * fps_out
+            keep_decider = numpy.ceil(total_considered / total_frames)
+            kept = 0
+            for idx in range(start, end):
+                if keep_decider and idx % keep_decider != 0:
+                    continue
+                kept += 1
+            
         
         
         if size[0] <= 0 or size[1] <= 0:
@@ -736,7 +816,7 @@ class ImageCropper(QMainWindow):
                                         dir=os.path.dirname(os.path.abspath(out_path))) as tmp:
             tmp_out_path = tmp.name
 
-        # Inicializar VideoWriter (tentando codecs candidatos, como você já fazia)
+        # Inicializar VideoWriter (tentando codecs candidatos, como vocÃª jÃ¡ fazia)
         fourcc = cv2.VideoWriter_fourcc(*codec)
         writer = cv2.VideoWriter(tmp_out_path, fourcc, fps_out, size)
 
@@ -778,7 +858,29 @@ class ImageCropper(QMainWindow):
             if crop_rect is not None:
                 frame = frame[y:y+h_out, x:x+w_out]
 
-            
+            if ret and change_final_time is not None:
+                time_ms = video_in.get(cv2.CAP_PROP_POS_MSEC)
+                time_sec = time_ms / 1000.0
+                text = f"t = {time_sec:.2f} s"
+    
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 1.0
+                thickness = 2
+
+                color = (0, 255, 0)
+
+                # Calcula o tamanho do texto (largura e altura)
+                (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
+
+
+                h, w = frame.shape[:2]
+                x = w - text_width - 20   # 20 px de margem direita
+                y = 40                    # 40 px a partir do topo
+
+                # Escreve o texto no frame
+                cv2.putText(frame, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
+
+
 
 
             # save frame 
@@ -804,6 +906,9 @@ class ImageCropper(QMainWindow):
             progress.setValue(kept)
         else:
             os.remove(tmp_out_path)
+            
+            
+            
             
     def draw_square(self, event, x, y, flags, param, imagem):
 
