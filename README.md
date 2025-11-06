@@ -19,6 +19,9 @@ Install:
 
     pip install drap
 
+User Guide:
+    https://drive.google.com/drive/folders/1D3Aj5R231DEiVliRnFsXuLpEqfVS7Ol9?usp=sharing
+    
 Use:
 
     drap -o 1 (Gui interface)
