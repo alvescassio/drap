@@ -105,8 +105,8 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        self.test = True
-        # self.test = False
+        # self.test = True
+        self.test = False
         # print("teste")
         
         

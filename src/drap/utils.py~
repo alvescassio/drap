@@ -2245,7 +2245,7 @@ class conc_scat_video:
         
         progress = ProgressHandler(self, label="Reading frames...", maximum=n_frames_to_process)
         progress.update(0)
-        print(dir(progress))
+
 
 
         while has_frame: # take frame just end of video           
