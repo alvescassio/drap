@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QApplication, QProgressDialog, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog, 
-                             QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QSlider, QDialog, QDialogButtonBox, QDoubleValidator,
+                             QMessageBox, QLineEdit, QHBoxLayout, QGroupBox, QCheckBox, QRadioButton, QSlider, QDialog, QDialogButtonBox,
                              QComboBox, QGridLayout, QSpinBox)
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QMouseEvent, QColor, QDoubleValidator
 from PyQt5.QtCore import Qt, QPoint, QRect, QFileInfo, QTimer, QEvent, QSize
 from fabio.edfimage import EdfImage
 import tkinter as tk
@@ -105,8 +105,8 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        # self.test = True
-        self.test = False
+        self.test = True
+        # self.test = False
         # print("teste")
         
         
@@ -311,6 +311,19 @@ class ImageCropper(QMainWindow):
         self.int_layout2.addWidget(self.int_input2)
         self.int_layout2.addWidget(self.int_output2)
         self.controls_layout.addWidget(self.int_group2)
+        
+        # Group to third-a integer
+        self.int_group3a = QGroupBox("Time initial")
+        self.int_layout3a = QVBoxLayout()
+        self.int_group3a.setLayout(self.int_layout3a)
+        self.int_input_label3a = QLabel('Type the value of initial time (s):', self)
+        self.int_input3a = QLineEdit(self)
+        self.int_input3a.setText("0") 
+        self.int_output3a = QLabel('', self)
+        self.int_layout3a.addWidget(self.int_input_label3a)
+        self.int_layout3a.addWidget(self.int_input3a)
+        self.int_layout3a.addWidget(self.int_output3a)
+        self.controls_layout.addWidget(self.int_group3a)
 
         # Group to third integer
         self.int_group3 = QGroupBox("Time limit")
@@ -370,7 +383,8 @@ class ImageCropper(QMainWindow):
             self.load_image()
             self.int_input1.setText("45.") 
             self.int_input2.setText("1") 
-            self.int_input3.setText("25") 
+            self.int_input3a.setText("100") 
+            self.int_input3.setText("300") 
             self.int_input4.setText("1.0") 
 
         self.show()
@@ -383,7 +397,8 @@ class ImageCropper(QMainWindow):
 
         
         if self.test: 
-            self.file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste.mp4"
+            self.file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/Breathing-SAXS-GT-Ag-GLU-NS-3⁄3-merge.flv" 
+            #"/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste.mp4"
             # "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste_completo.mp4" teste_bolha.mp4
             # self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
         else:
@@ -1004,58 +1019,7 @@ class ImageCropper(QMainWindow):
                 if os.path.exists(filename) and os.path.getsize(filename) > 0:
                     available.append(codec)
         return available
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-
-
-
-
+         
 
     def sort_images_edf_time(self):
 
@@ -1256,12 +1220,13 @@ class ImageCropper(QMainWindow):
             return;
 
         if (self.int_input1.text() and self.int_input2.text() and self.int_input3.text() and self.int_input4.text()):
-            numbers = [(input_field.text()) for input_field in [self.int_input1, self.int_input2, self.int_input3, self.int_input4]];
+            numbers = [(input_field.text()) for input_field in [self.int_input1,self.int_input2, self.int_input3a, self.int_input3, self.int_input4]];
 
-            for output_field, number in zip([self.int_output1, self.int_output2, self.int_output3], numbers):
-                output_field.setText(f'Number: {number}')
             
-            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_limit = int(numbers[2]), Co = float(numbers[3]), retangulo = self.ret, print_pdf = print_pdf);
+            # for output_field, number in zip([self.int_output1, self.int_output2, self.int_input3a, self.int_output3], numbers):
+            #     output_field.setText(f'Number: {number}')
+            
+            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_0 =int(numbers[2]), time_limit = int(numbers[3]), Co = float(numbers[4]), retangulo = self.ret, print_pdf = print_pdf);
             result_image = set_file_1.read_video();
             if result_image:
                 self.result_image = QPixmap(result_image)
@@ -1974,6 +1939,7 @@ class conc_scat_video:
                     self.path = Path(self.path);
                     self.path = self.path.resolve();
                     self.path = os.path.normpath(self.path);
+                self.time_0 = 0
                 if line.find('time_limit_2:') != -1:
                     self.time_limit = float(str(line[line.index(':')+1:]));
                 if line.find('print_pdf_2:') != -1:
@@ -2007,6 +1973,8 @@ class conc_scat_video:
                 self.px_mm_inv = 1. / self.px_mm
             if 'step' in kwargs:
                 self.step = kwargs['step'];
+            if 'time_0' in kwargs:
+                self.time_0 = kwargs['time_0'];                
             if 'time_limit' in kwargs:
                 self.time_limit = kwargs['time_limit'];
             if 'retangulo' in kwargs:
@@ -2201,10 +2169,21 @@ class conc_scat_video:
         fps = video.get(cv2.CAP_PROP_FPS);
         total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         max_frames = total_frames;
+        
+        time_0_s = float(self.time_0) 
+
+        start_frame = int(time_0_s * fps)
+
+        if start_frame < 0:
+            start_frame = 0
+
+        if start_frame >= total_frames:
+            start_frame = total_frames - 1        
+       
 
         size_data = int(total_frames /  self.step) + 1;
         if self.time_limit != 0:
-            size_data = int(self.time_limit*fps /  self.step) + 1;
+            size_data = int(self.time_limit*fps /  self.step) - start_frame + 1;
         else:
             self.time_limit = total_frames / fps;
         
@@ -2220,8 +2199,8 @@ class conc_scat_video:
         # flag_temp = 0;
         # print(temp_m)
 
-        frame_count = 0
-        saved_frame_count = 0
+        # frame_count = 0
+        # saved_frame_count = 0
         data_i = 0;
 
         # set name and directory output files 
@@ -2232,7 +2211,9 @@ class conc_scat_video:
 
         file_image_str = os.path.join(path_dir_imgs, self.name_file+"_data_images.dat")
         os.makedirs(os.path.dirname(file_image_str), exist_ok=True)
-        file_data_imgs = open(file_image_str, "w", encoding='utf-8');
+        file_data_imgs = open(file_image_str, "w", encoding='utf-8');   
+
+        video.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         has_frame, frame = video.read();
         file_img = os.path.join(path_dir_imgs,self.name_file+'_sample_frame.jpg');
@@ -2248,14 +2229,31 @@ class conc_scat_video:
 
         amplie = False;
         factor = 1;
+        
+        frame_count = start_frame
+
         start_time = timelib.time()
         
-        progress = ProgressHandler(self, label="Reading frames...", maximum=total_frames)
+        if self.time_limit > 0:
+            end_frame = int((self.time_0 + self.time_limit) * fps)
+            end_frame = min(end_frame, total_frames)
+        else:
+            end_frame = total_frames
 
-        while has_frame: # take frame just end of video
+        n_frames_to_process = end_frame - start_frame
+
+        
+        progress = ProgressHandler(self, label="Reading frames...", maximum=n_frames_to_process)
+        progress.update(0)
+        print(dir(progress))
+
+
+        while has_frame: # take frame just end of video           
+            
 
             if (frame_count / fps) > self.time_limit: break;
-            img_h, img_w = frame.shape[:2];
+            img_h, img_w = frame.shape[:2];            
+
 
             if frame_count % self.step == 0:
                 time = frame_count / fps;
@@ -2488,6 +2486,8 @@ class conc_scat_video:
         
         
         new_data_time_size = delete_value_extrem(data_time_size);
+        
+        
         
         self.coef_pol_w = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 1],12);
         self.coef_pol_h = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 2],12);

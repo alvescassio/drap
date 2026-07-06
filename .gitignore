@@ -8,6 +8,7 @@ __pycache__/
 *.log
 *.png
 *.mp4
+*.flv
 src/drap/video_save.py
 *~
 
@@ -16,6 +17,7 @@ build/
 dist/
 *.whl
 *.tar.gz
+*.zip
 
 # Virtual env
 .venv/
