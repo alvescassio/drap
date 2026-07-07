@@ -105,7 +105,7 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        # self.test = True
+        # # self.test = True
         self.test = False
         # print("teste")
         
@@ -383,8 +383,8 @@ class ImageCropper(QMainWindow):
             self.load_image()
             self.int_input1.setText("45.") 
             self.int_input2.setText("1") 
-            self.int_input3a.setText("100") 
-            self.int_input3.setText("300") 
+            self.int_input3a.setText("650") 
+            self.int_input3.setText("750") 
             self.int_input4.setText("1.0") 
 
         self.show()
@@ -2044,6 +2044,11 @@ class conc_scat_video:
         # Iterate over the images and add them to the PDF
         num_imagens = len(list_data_imgs)
         num_paginas = (num_imagens + 19) // 20  # 20 imagens por página (4x5)
+        
+        start_time = timelib.time()
+        
+        progress = ProgressHandler(self, label="Printing frames in pdf file.", maximum=num_paginas)
+        progress.update(0)
 
         for pagina in range(num_paginas):
 
@@ -2076,9 +2081,16 @@ class conc_scat_video:
                             os.remove(caminho_imagem)
                         except FileNotFoundError:
                             print(f"O arquivo não foi encontrado: {caminho_imagem}")
+            elapsed_time = timelib.time() - start_time;
+            progress.update(pagina, elapsed_time)          
+            if progress.was_canceled():
+                progress.finish()
+                # print("Process canceled by user.")
+                return None
+        
 
         pdf.save()
-
+        progress.finish()
 
     def read_setfiles_edf(self, **kwargs):
 
@@ -2173,34 +2185,34 @@ class conc_scat_video:
         time_0_s = float(self.time_0) 
 
         start_frame = int(time_0_s * fps)
-
         if start_frame < 0:
             start_frame = 0
 
         if start_frame >= total_frames:
-            start_frame = total_frames - 1        
-       
+            start_frame = total_frames - 1  
+        
+        if self.time_limit > 0:
+            end_frame = int(float(self.time_limit) * fps)
+        else:
+            end_frame = total_frames
+            
+        if end_frame <= start_frame:
+            raise ValueError("time_limit must be greater than time_0")
 
+        n_frames_to_process = end_frame - start_frame
+        
         size_data = int(total_frames /  self.step) + 1;
         if self.time_limit != 0:
-            size_data = int(self.time_limit*fps /  self.step) - start_frame + 1;
+            size_data = int( n_frames_to_process / self.step) + 2
         else:
             self.time_limit = total_frames / fps;
         
         # set data matrix store data
         new_size_data = size_data;
-        data_time_size = numpy.zeros(shape=(size_data, 9), dtype = float );
-        temp_size_window = numpy.zeros(shape=(size_data, 2), dtype = float );
+        data_time_size = numpy.full((size_data, 9), np.nan, dtype=float)
+        # data_time_size = numpy.zeros(shape=(size_data, 9), dtype = float );
+        temp_size_window = numpy.zeros(shape=(size_data, 2), dtype = float ); 
         
-        # col1 = np.arange(0.8, 0.09, -0.05)
-        # col2 = np.ones_like(col1)
-        # col2 = 30* col2;
-        # temp_m = np.column_stack((col1, col2))
-        # flag_temp = 0;
-        # print(temp_m)
-
-        # frame_count = 0
-        # saved_frame_count = 0
         data_i = 0;
 
         # set name and directory output files 
@@ -2220,38 +2232,34 @@ class conc_scat_video:
         cv2.imwrite(file_img,frame); #exit();
 
         # crop image to restrict background
-        new_start_x = self.start_x;
-        new_start_y = self.start_y;
-        ref_end_x = new_end_x = self.start_x + self.width;
-        ref_end_y = new_end_y = self.start_y + self.height;
+        start_x = new_start_x = self.start_x;
+        start_y = new_start_y = self.start_y;
+        end_x = ref_end_x = new_end_x = self.start_x + self.width;
+        end_y = ref_end_y = new_end_y = self.start_y + self.height;
         ref_width = abs(self.width);
         ref_height = abs(self.height);
+        
 
         amplie = False;
         factor = 1;
         
-        frame_count = start_frame
+        frame_count = start_frame        
+        last_width = None
+        last_height = None
+        
+
 
         start_time = timelib.time()
-        
-        if self.time_limit > 0:
-            end_frame = int((self.time_0 + self.time_limit) * fps)
-            end_frame = min(end_frame, total_frames)
-        else:
-            end_frame = total_frames
-
-        n_frames_to_process = end_frame - start_frame
-
         
         progress = ProgressHandler(self, label="Reading frames...", maximum=n_frames_to_process)
         progress.update(0)
 
 
 
-        while has_frame: # take frame just end of video           
+        while has_frame and frame_count < end_frame: # take frame just end of video           
             
 
-            if (frame_count / fps) > self.time_limit: break;
+            # if (frame_count / fps) > self.time_limit: break;
             img_h, img_w = frame.shape[:2];            
 
 
@@ -2261,16 +2269,36 @@ class conc_scat_video:
                 time_str = time_str.replace('.', '_')
 
                 
-                if data_i >= 1:
+                if data_i >= 1 and last_width is not None and last_height is not None:
+                    
                     # reduce the area in image croped to reduce background noises
-                    area = abs(new_end_x - new_start_x) * abs(new_end_y - new_start_y);
+                    area = abs(new_end_x - new_start_x) * abs(new_end_y - new_start_y); 
+                    
                     x_start = self.start_x + abs(self.start_x - new_start_x) + (x_start/factor);
                     y_start = self.start_y + abs(self.start_y - new_start_y) + (y_start/factor);
-                    x_center = int((x_start + (x_start + width))/ 2.)
-                    y_center = int((y_start + (y_start + height))/ 2.)
+                    
+                    if x_start >= self.width  or y_start >= self.height:
+                        start_x = new_start_x = self.start_x;
+                        start_y = new_start_y = self.start_y;
+                        end_x = ref_end_x = new_end_x = self.start_x + self.width;
+                        end_y = ref_end_y = new_end_y = self.start_y + self.height;
+                        ref_width = abs(self.width);
+                        ref_height = abs(self.height);
+                        x_start = 0
+                        y_start = 0
+
+                    
+                    x_center = int((x_start + (x_start + last_width))/ 2.)
+                    y_center = int((y_start + (y_start + last_height))/ 2.)
+                    # print(data_i,time, frame_count, x_start, last_width, width, factor)
+                        
+                    # if data_i >= 500: exit(0)
+                    
+
+
 
                     # if size of drop reduce the image croped reduce
-                    if ( (width * height) < 0.2 * area or (ref_width - width) < 0.15 * ref_width or (ref_height - height) < 0.15 * ref_height   ):
+                    if ( (last_width * last_height) < 0.2 * area or (ref_width - last_width) < 0.15 * ref_width or (ref_height - last_height) < 0.15 * ref_height   ):
                         if data_i > 200:
                             window = 200;
                         else:
@@ -2281,11 +2309,11 @@ class conc_scat_video:
                         avg_h = numpy.mean(_h) ;
                         if avg_w < 0.15* abs(ref_end_x - self.start_x): avg_w = 0.15 * abs(ref_end_x - self.start_x);
                         if avg_h < 0.15* abs(ref_end_y - self.start_y): avg_h =0.15 *abs(ref_end_y - self.start_y);
-                        factor_exp = 0.15;
+                        factor_exp = 0.15;                        
                         new_start_x = int(( x_center - avg_w/2) - (factor_exp * avg_w));
                         new_end_x = int(( x_center + avg_w/2) + (factor_exp * avg_w));
                         if new_start_x < self.start_x: new_start_x = self.start_x;
-                        if new_end_x > ref_end_x:  new_end_x = ref_end_x;
+                        if new_end_x > ref_end_x:  new_end_x = ref_end_x;                       
                         ref_width = abs(new_end_x - new_start_x);
                         new_start_y =  int(( y_center - avg_h/2) - (factor_exp * avg_h));
                         new_end_y =  int(( y_center + avg_h/2) + (factor_exp * avg_h));
@@ -2293,33 +2321,66 @@ class conc_scat_video:
                         if new_end_y > ref_end_y: new_end_y = ref_end_y;
                         ref_height = abs(new_end_y - new_start_y);
                         amplie = True;
+                        if new_end_x <= new_start_x or new_end_y <= new_start_y:
+                            new_start_x = self.start_x
+                            new_end_x = self.start_y
+                            new_start_y = self.start_x + self.width;
+                            new_end_y =  self.start_y + self.height;
+
+                            
 
 
-                # print(new_start_y,new_end_y, new_start_x,new_end_x, " ")
+                
                 # cv2.imwrite("teste.png",frame); #exit();
                 #crop image
+                                  
+                      
+                
                 imagem = frame[new_start_y:new_end_y, new_start_x:new_end_x];
+                # print(imagem.shape, new_start_y,new_end_y, new_start_x,new_end_x, " ")
                 # cv2.imwrite("teste1.png",imagem); #exit();                
                 # cv2.imshow("teste1",imagem)
+                # file_img = os.path.join(path_dir_imgs,self.name_file+'_img_'+str(frame_count) + '.jpg');
+                # cv2.imwrite(file_img,imagem);
                
 
                 img_h, img_w = imagem.shape[:2];
+                if img_w <= 0 or img_h <= 0:
+                    frame_count += 1
+                    has_frame, frame = video.read()
+                    continue
+                
                 if data_i >= 1 or amplie:
-                    if (width ) < 0.7:
+                    if (width ) < 5:
                         factor = 12;
                 new_w = int(img_w * factor)
                 new_h = int(img_h * factor)
+                
+                if  new_w < 5 or  new_h < 5 :
+                    frame_count += 1
+                    has_frame, frame = video.read()
+                    continue
+                
+                
+                if imagem is None or imagem.size == 0:
+                    frame_count += 1
+                    has_frame, frame = video.read()
+                    continue
 
-                
-                if new_w <= 1 or new_h <= 1:
-                    message = f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s."
-                    show_message(self, "Check the video", message, details=None, level="error")
-                    # print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
-                    return None
-                
-                
-                
                 imagem = cv2.resize(imagem, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                
+                
+                    
+                                    
+                    
+
+                    # message = f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s."
+                    # show_message(self, "Check the video", message, details=None, level="error")
+                    # # print(f"Error, check the video; it seems probably there is no droplet image starting from {int(time)} s.")                   
+                    # return None
+                
+                
+                
                 # cv2.imwrite("saida_crop.png",imagem);
 
                 # start morphological analysis of image               
@@ -2424,10 +2485,15 @@ class conc_scat_video:
                     
                     pontos = numpy.vstack(contours).squeeze() # Combine all contour points into a single list
                     x_start, y_start, width, height = cv2.boundingRect(pontos)  #Find the bounding rectangle that groups all contours
+                    if data_i == 0:
+                        x_start_ref = x_start
+                        y_start_ref = y_start
                     imagem_temp = imagem.copy()     
                     cv2.rectangle(imagem, (x_start, y_start), (x_start + width, y_start + height), (0, 255, 0), 2)
                     width = int( width / factor ) 
                     height = int( height / factor) 
+                    last_width = width
+                    last_height = height
                     temp_size_window[data_i][0] = width 
                     temp_size_window[data_i][1] = height
                        
@@ -2449,6 +2515,10 @@ class conc_scat_video:
                     
                     file_img = os.path.join(path_dir_imgs,self.name_file+'_img_'+str(data_i) + '.jpg');
                     file_data_imgs.write(file_img+" "+"{:7.3f}".format(time)+" s "+"{:8.4e}".format(data_time_size[data_i][6])+" mg/ml \n");
+                    
+                    # file_img = os.path.join(path_dir_imgs,self.name_file+'_img_'+str(frame_count) + 'b.jpg');
+                    # cv2.imwrite(file_img,imagem);
+                    
                     if self.print_pdf:
                         cv2.putText(imagem,str(time), text_position, font, scale_font, text_color, line_thickness, cv2.LINE_AA)
                         cv2.imwrite(file_img,imagem);
@@ -2473,7 +2543,7 @@ class conc_scat_video:
             elapsed_time = timelib.time() - start_time;
 
             # print(f"Iteration {frame_count + 1}/{(self.time_limit*fps)}, Elapsed time: {elapsed_time:.2f} seconds", end='\r')
-            progress.update(frame_count, elapsed_time)          
+            progress.update(frame_count - start_frame, elapsed_time)          
             if progress.was_canceled():
                 progress.finish()
                 # print("Process canceled by user.")
@@ -2484,15 +2554,16 @@ class conc_scat_video:
         progress.finish()
         file_data_imgs.close();
         
-        
+        data_time_size = data_time_size[~np.isnan(data_time_size[:, 0])]
         new_data_time_size = delete_value_extrem(data_time_size);
         
-        
-        
-        self.coef_pol_w = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 1],12);
-        self.coef_pol_h = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 2],12);
-        self.coef_pol_area = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 6],12);
-        self.coef_pol_conc = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 7],12);
+        degree = 12
+            
+       
+        self.coef_pol_w = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 1],degree);
+        self.coef_pol_h = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 2],degree);
+        self.coef_pol_area = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 6],degree);
+        self.coef_pol_conc = numpy.polyfit(new_data_time_size[:, 0],new_data_time_size[:, 7],degree);
   
         
 
@@ -2593,6 +2664,34 @@ def menu():
     print("3. Join frames and videos")
     print("4. Create data treatment list")
     print("5. Exit");
+
+
+def best_polyfit_degree(x, y, max_degree=12):
+
+    n = len(x)
+
+    best_deg = 1
+    best_aic = numpy.inf
+
+    for deg in range(1, min(max_degree, n-1)+1):
+
+        coef = numpy.polyfit(x, y, deg)
+
+        yfit = numpy.polyval(coef, x)
+
+        rss = numpy.sum((y-yfit)**2)
+
+        if rss <= 0:
+            rss = 1e-30
+
+        aic = n*numpy.log(rss/n) + 2*(deg+1)
+
+        if aic < best_aic:
+            best_aic = aic
+            best_deg = deg
+
+    return best_deg
+
 
 
 
