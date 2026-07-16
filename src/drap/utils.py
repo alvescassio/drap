@@ -105,7 +105,7 @@ class ImageCropper(QMainWindow):
 
     def initUI(self):
         
-        # # self.test = True
+        # self.test = True
         self.test = False
         # print("teste")
         
@@ -369,11 +369,24 @@ class ImageCropper(QMainWindow):
         self.load_directory_button = QPushButton('Match files from samples and background', self)
         self.controls_layout.addWidget(self.load_directory_button)
         self.load_directory_button.clicked.connect(self.contate_sort_images_edf_size_drop)
+        
+        checkbox_layout = QHBoxLayout()
     
-        # Checkbox para opção extra
-        self.check_option = QCheckBox("Print a PDF with images", self)
-        self.check_option.setChecked(False)  # desmarcado por padrão
-        self.controls_layout.addWidget(self.check_option)
+        # Checkbox para opção print pdf
+        self.check_option_printpdf = QCheckBox("Print a PDF with images", self)
+        self.check_option_printpdf.setChecked(False)  # desmarcado por padrão
+        checkbox_layout.addWidget(self.check_option_printpdf)
+        
+        # Checkbox para opção reduce ROI during analysis drop image
+        self.check_option_roi = QCheckBox("Reduce ROI", self)
+        self.check_option_roi.setChecked(True)  # desmarcado por padrão
+        checkbox_layout.addWidget(self.check_option_roi)
+        
+        # Opcional: empurra os checkboxes para a esquerda
+        checkbox_layout.addStretch()
+        
+        # Adiciona o layout horizontal ao layout principal
+        self.controls_layout.addLayout(checkbox_layout)
      
         # Hook mouse events
         self.image_label.installEventFilter(self)
@@ -383,9 +396,12 @@ class ImageCropper(QMainWindow):
             self.load_image()
             self.int_input1.setText("45.") 
             self.int_input2.setText("1") 
-            self.int_input3a.setText("650") 
-            self.int_input3.setText("750") 
+            self.int_input3a.setText("0") 
+            self.int_input3.setText("1500") 
             self.int_input4.setText("1.0") 
+            self.check_option_printpdf.setChecked(True)
+            self.check_option_roi.setChecked(False)
+            
 
         self.show()
 
@@ -397,7 +413,7 @@ class ImageCropper(QMainWindow):
 
         
         if self.test: 
-            self.file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/Breathing-SAXS-GT-Ag-GLU-NS-3⁄3-merge.flv" 
+            self.file_path = "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/2026-06-14-Breathing-RG-298-usAu-Tiop-1⁄3-merge.flv" 
             #"/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste.mp4"
             # "/home/standard02/Documents/programming/python/bolhas/PyPI/drap/teste_completo.mp4" teste_bolha.mp4
             # self.file_path, _ = QFileDialog.getOpenFileName(self, 'Open Video', '', 'Videos (*.avi *.mp4 *.mov *.mkv *.wmv *.flv *.mpg *.mpeg *.3gp *.ogv .webm)')
@@ -1208,10 +1224,15 @@ class ImageCropper(QMainWindow):
     def calcule_size_drop(self):
         
         
-        if self.check_option.isChecked():
+        if self.check_option_printpdf.isChecked():
             print_pdf = True
         else:
             print_pdf = False
+        
+        if self.check_option_roi.isChecked():
+            reduce_roi = True
+        else:
+            reduce_roi = False
         
         if hasattr(self,  'ret') and self.ret is not None:
             pass;
@@ -1226,7 +1247,9 @@ class ImageCropper(QMainWindow):
             # for output_field, number in zip([self.int_output1, self.int_output2, self.int_input3a, self.int_output3], numbers):
             #     output_field.setText(f'Number: {number}')
             
-            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_0 =int(numbers[2]), time_limit = int(numbers[3]), Co = float(numbers[4]), retangulo = self.ret, print_pdf = print_pdf);
+            set_file_1 = conc_scat_video(3, file_video =self.file_path, px_mm = float(numbers[0]) , step = int(numbers[1]), time_0 =int(numbers[2]),
+                                         time_limit = int(numbers[3]), Co = float(numbers[4]), retangulo = self.ret,
+                                         print_pdf = print_pdf, reduce_roi= reduce_roi);
             result_image = set_file_1.read_video();
             if result_image:
                 self.result_image = QPixmap(result_image)
@@ -1904,6 +1927,14 @@ class conc_scat_video:
                         self.print_pdf = True
                     else: 
                         self.print_pdf = False
+                if line.find('reduce_roi_1:') != -1:
+                    temp = str(line[line.index(':')+1:])
+                    temp = temp.strip()
+                    temp = temp.lower()
+                    if temp == "y" or temp == "yes" :                        
+                        self.reduce_roi = True
+                    else: 
+                        self.reduce_roi = False
             f_open.close();
 
         elif option  == 2:
@@ -1950,6 +1981,14 @@ class conc_scat_video:
                         self.print_pdf = True
                     else: 
                         self.print_pdf = False
+                if line.find('reduce_roi_2:') != -1:
+                    temp = str(line[line.index(':')+1:])
+                    temp = temp.strip()
+                    temp = temp.lower()
+                    if temp == "y" or temp == "yes" :                        
+                        self.reduce_roi = True
+                    else: 
+                        self.reduce_roi = False
                     
             f_open.close();
             if hasattr(self, 'file_video') and self.file_video is not None:
@@ -1987,6 +2026,10 @@ class conc_scat_video:
                 self.print_pdf = kwargs['print_pdf'];
             else:
                 self.print_pdf = False;
+            if 'reduce_roi' in kwargs:
+                self.reduce_roi = kwargs['reduce_roi'];
+            else:
+                self.reduce_roi = True;
 
         elif option  == 4 or option  == 5:
             if 'Co' in kwargs:
@@ -2298,7 +2341,7 @@ class conc_scat_video:
 
 
                     # if size of drop reduce the image croped reduce
-                    if ( (last_width * last_height) < 0.2 * area or (ref_width - last_width) < 0.15 * ref_width or (ref_height - last_height) < 0.15 * ref_height   ):
+                    if ( self.reduce_roi and ( (last_width * last_height) < 0.2 * area or (ref_width - last_width) < 0.15 * ref_width or (ref_height - last_height) < 0.15 * ref_height)  ):
                         if data_i > 200:
                             window = 200;
                         else:
